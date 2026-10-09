@@ -326,20 +326,7 @@ More details:
 - **The anchor** is the window you're in when you press F12, or the client where you typed `/bb stack`. If you press F12 in WoWBox itself, the leader is the anchor.
 - **Mirroring plus stacking is lockstep.** With mirroring on, the followers restack every time you stop moving (`stack.on_stop`). This replaces `/follow` while mirroring, because follow would pull them behind you. Press your movement keys and they move with you. Stop, and any drift is corrected within a second or two.
 - **You can always take over.** Pressing a movement key yourself cancels a running stack. So does pressing F12 again.
-- **Frame rate sets the precision.** WoW applies a key once per frame, so the smallest turn or step is one frame's worth. WoWBox holds every key for a whole number of frames, which makes each correction exact. What's left is at most half a frame of turning or walking. Simulated results:
-
-  | Client fps | Typical | Worst |
-  |---|---|---|
-  | 120–144 | 0.03 yd, 0.4° | 0.1 yd, 1.0° |
-  | 60 | 0.06 yd, 1.0° | 0.13 yd, 2.0° |
-  | 30 | 0.10 yd, 1.9° | 0.18 yd, 3.6° |
-
-  The defaults (`tolerance_yards: 0.1`, `facing_tolerance_deg: 1`) widen automatically to half a frame when the frame rate can't do better. **To get facing under 1°, run the clients at 120 fps or more**, background windows included:
-  ```
-  /bb all console maxfpsbk 144
-  /bb all console maxfps 144
-  ```
-  Check the result in the Position column, which shows each client's fps. Your PC has to manage that rate for all clients at once.
+- **Frame rate sets the precision.** See [Frame rate and stacking precision](#frame-rate-and-stacking-precision) below. In short: **run every client at 144 fps** for facing within 1°.
 - **Where it works:** anywhere the client gives map coordinates. That includes the EQ zones on your server (tested with `GetPlayerMapPosition`). In a place without coordinates, the Position column stays empty and stacking reports "no map position". Use follow there.
 - **Keep the world map closed.** Positions are relative to the map being shown, so while a client has its world map open, that client reports no position.
 - **Mounted, walking or slowed:** the measured speed adapts. Tolerances in yards assume the normal 7 yd/s run speed (`stack.run_speed`).
@@ -356,6 +343,33 @@ stack:
   run_speed: 7.0
   map_aspect: 1.5           # zone maps are 3:2
 ```
+
+#### Frame rate and stacking precision
+
+**The limit is the game, not a setting.** WoW applies a held key once per frame. A character therefore turns, and walks, in steps of one frame's worth. Keyboard turning runs at 180° per second, so one step is 180° divided by the frame rate:
+
+| Client fps | One frame of turning | One frame of running | Guaranteed facing | Simulated typical / worst |
+|---|---|---|---|---|
+| 30 | 6.0° | 0.23 yd | ±3.0° | 1.9° / 3.6° |
+| 60 | 3.0° | 0.12 yd | ±1.5° | 1.0° / 2.0° |
+| 120 | 1.5° | 0.06 yd | ±0.75° | 0.4° / 1.0° |
+| **144** | **1.25°** | **0.05 yd** | **±0.6°** | **0.3° / 0.9°** |
+
+**Why it can't "just keep going until it's under 1°" at 60 fps.** Say a character is 1.6° off. The smallest possible correction is one frame, which is 3°, so it lands 1.4° off the other way. Correcting again goes back to 1.6°. It would swing back and forth forever. So WoWBox stops at whatever whole number of frames gets closest, which is at most half a frame off (±1.5° at 60 fps). Sometimes you'll see 0°: the error just happened to be close to a multiple of 3°. That's luck, not something WoWBox can repeat.
+
+**How WoWBox gets the most out of each frame.** It holds every key for exactly a whole number of frame-times. A hold of *n* frame-times always spans exactly *n* frames, wherever it starts, so every correction lands exactly where it's aimed. The facing tolerance (`stack.facing_tolerance_deg`, default 1°) and the position tolerance (`stack.tolerance_yards`, default 0.1) are widened automatically to half a frame when the frame rate can't do better. Each client's own fps comes from BoxBridge.
+
+**Running at 144 fps (recommended).** Run these once, in any client. They apply to every client, including background windows, and WoW saves them:
+```
+/bb all console maxfps 144
+/bb all console maxfpsbk 144
+/bb all console gxVSync 0
+```
+- `maxfps` caps the frame rate of the window you're playing in.
+- `maxfpsbk` caps it for windows in the background. All but one of your clients are always in the background, so this one matters most. WoW keeps background windows slow unless you raise it.
+- `gxVSync 0` turns off vsync, which otherwise caps the frame rate at your monitor's refresh rate (often 60). Some clients need a restart before a vsync change takes effect. You can also switch it off in Video options.
+
+Then check the **Position** column in the Clients tab, which shows each client's fps. If a client still shows about 60, vsync or the graphics driver is capping it. If the fps is below 144 and fluctuates, your PC is the limit, because it has to draw every client at that rate. Lower in-game graphics settings help. Anything from 120 fps up gives facing under 1°.
 
 ### Follow settings
 
@@ -660,7 +674,7 @@ They use fake Win32 implementations, so nothing touches real windows.
 | Follow mode doesn't re-follow | Does the State column show `following` while a character follows? If not, `/reload` that client for the current addon. Re-follow also waits during combat or casting, and for the window you're in. |
 | Mirrored movement does nothing in background windows | That client ignores posted movement keys. Use follow mode without mirroring. |
 | Stack fails with "no map position" | No coordinates in that area, or that client's world map is open. |
-| Stack ends a degree or two off | That's half a frame of turning at that client's frame rate. Raise it: `/bb all console maxfpsbk 144` and check the fps in the Position column. |
+| Stack ends a degree or two off | That's half a frame of turning at that client's frame rate (±1.5° at 60 fps). Run at 144 fps: `/bb all console maxfps 144`, `/bb all console maxfpsbk 144`, `/bb all console gxVSync 0`. Check the fps in the Position column. See *Frame rate and stacking precision* (section 11). |
 | Stack turns the wrong way or strafes instead of turning | A/D aren't bound to turn left/right on that character. Set the `stack.*` keys. |
 | Game blurry or stretched | Set the in-game resolution to the window size (section 14). |
 | Black screen after arranging | D3D device reset. Arrange at character select, or use Restore frames. |
@@ -669,7 +683,7 @@ They use fake Win32 implementations, so nothing touches real windows.
 
 ## 19. Known limits
 
-- **Not yet tested in a live game:** stacking, and modifier chords under `post`. Stacking was tested against a simulation of WoW movement at 10–60 fps. `/bb` commands, typed steps and mirrored movement have worked in a live game. If modifier chords fail on followers, use `modifier_mode: focus_swap`.
+- **Not yet tested in a live game:** modifier chords under `post`. Stacking has been used in a live game; at 144 fps it gets facing within about a degree. `/bb` commands, typed steps and mirrored movement have worked in a live game. If modifier chords fail on followers, use `modifier_mode: focus_swap`.
 - **Mouse input** isn't broadcast or mirrored.
 - **Bridge size limits:** the strip carries 54 bytes per frame, which is why chat lines and commands are cut to 27 bytes.
 - **Covered windows** fall back to PrintWindow. That's slower, but works.
