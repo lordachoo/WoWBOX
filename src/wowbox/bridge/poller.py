@@ -16,6 +16,8 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+BOOST_HZ = 30.0  # while stacking: fresher positions mean shorter waits between moves
+
 
 class BridgePoller:
     def __init__(self, cfg: BridgeConfig, team: "Team", windows: WindowAPI,
@@ -36,6 +38,7 @@ class BridgePoller:
         self._last_frame: dict[int, tuple[int, float]] = {}  # hwnd -> (counter, time it last changed)
         self.last_error: dict[int, str] = {}
         self.last_method: dict[int, str] = {}
+        self._boost_until = 0.0
 
     @property
     def region(self) -> Rect:
@@ -54,12 +57,16 @@ class BridgePoller:
             self._thread.join(2)
             self._thread = None
 
+    def boost(self, seconds: float) -> None:
+        """Poll at BOOST_HZ for the next `seconds` (0 = back to normal now)."""
+        self._boost_until = self._clock() + seconds
+
     def _run(self) -> None:
         cap = self._capture_factory()
         try:
-            period = 1.0 / max(0.5, self.cfg.hz)
             while not self._stop.is_set():
                 t0 = self._clock()
+                period = 1.0 / (BOOST_HZ if t0 < self._boost_until else max(0.5, self.cfg.hz))
                 self.poll_once(cap)
                 self._stop.wait(max(0.0, period - (self._clock() - t0)))
         finally:

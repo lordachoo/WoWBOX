@@ -195,3 +195,26 @@ def test_command_slots():
     assert r.team.command_slots("3", 1) == [3]
     assert r.team.command_slots("leader", 2) == [1]
     assert r.team.command_slots("Nobody", 1) == []
+
+
+def test_mirroring_stacks_when_you_stop_instead_of_refollowing():
+    team, router, fm = follow_rig()
+    stacked = []
+    fm.stack_on_stop, fm.stack_delay = stacked.append, 0.4
+    fm.follow()
+    router.typed.clear()
+    router.mirror = True
+    team.clients[2].state = ClientState(following=False)
+    router.held, router.last_movement = True, 10.0
+    fm.tick(10.2)
+    assert stacked == []  # still moving
+    router.held = False
+    fm.tick(10.3)
+    assert stacked == []  # not stopped long enough
+    fm.tick(10.5)
+    assert stacked == [1]  # onto the window you're in
+    fm.tick(12)
+    assert stacked == [1] and router.typed == []  # once per stop, and no /follow while mirroring
+    router.last_movement = 15.0
+    fm.tick(16)
+    assert stacked == [1, 1]

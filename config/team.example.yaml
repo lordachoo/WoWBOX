@@ -37,6 +37,7 @@ hotkeys:                        # work while a WoW client or WoWBox has focus
   follow: "F10"                 # followers /target + /follow the leader; follow mode ON (re-follows when it breaks)
   stay: "F11"                   # followers stop; follow mode OFF
   mirror_movement: "Ctrl+Alt+M" # toggle: your movement keys also go to the followers
+  stack: "F12"                  # everyone walks onto the spot and facing of the window you're in
   focus_slot:                   # jump straight to a client
     1: "Ctrl+Alt+1"
     2: "Ctrl+Alt+2"
@@ -63,6 +64,17 @@ follow:
   stop_key: "S"                 # `stay` taps this on followers (any movement breaks /follow)
   movement_keys: ["W", "A", "S", "D", "Q", "E", "Space"]   # copied to followers while mirroring
   mirror_on_start: false
+
+stack:                          # F12 / Stack button / "/bb stack": walk followers onto one character's spot and facing
+  who: all                      # who gets stacked (the character they stack on is left out)
+  on_stop: true                 # while mirroring movement: re-stack every time you stop
+  on_stop_delay: 400ms
+  tolerance_yards: 0.5
+  facing_tolerance_deg: 3       # widened automatically when a client's frame rate is low
+  timeout: 10s
+  run_speed: 7.0                # yards/s unmounted; turns measured speed into yards
+  map_aspect: 1.5               # zone maps are 3:2
+  # movement keys it uses (WoW defaults): forward W, back S, strafe_left Q, strafe_right E, turn_left A, turn_right D
 
 # Who receives each key. First match wins; a chord matches exactly (Shift+1 is not 1).
 # Keys that aren't listed only go to the window you're in.

@@ -12,6 +12,7 @@ from PySide6.QtCore import QObject, QTimer, Signal
 from .automation import AutomationEngine
 from .automation.macros import MacroRunner
 from .follow import FollowManager
+from .stack import Stacker, StackManager, StackResult
 from .bridge import BridgePoller, ChatEvent, ClientState
 from .config import AppConfig, RouteConfig, load_config, save_config
 from .keys import parse_chord
@@ -48,6 +49,7 @@ class Controller(QObject):
     sig_launch_done = Signal()
     sig_identity = Signal()
     sig_chat = Signal(int, object)
+    sig_stack_done = Signal(object)
 
     def __init__(self, cfg_path: Path, cfg: AppConfig, windows: WindowAPI, input_api: InputAPI,
                  capture_factory: Callable[[], CaptureAPI]) -> None:
@@ -85,6 +87,11 @@ class Controller(QObject):
         self.macros = MacroRunner(cfg.macros, self.router)
         self.engine.on_macro = self.macros.start
         self.memread = MemReadPoller(cfg.memread, self._pids, self._on_mem_values)
+        self.stacker = Stacker(cfg.stack, self._client_state, self._post_raw)
+        self.stack = StackManager(cfg.stack, self.stacker, lambda anchor: self.team.resolve(self.cfg.stack.who, anchor),
+                                  on_done=self.sig_stack_done.emit, boost=self.bridge.boost,
+                                  moving_since=lambda: self.router.last_movement)
+        self._apply_stack_cfg()
         self.overlay = Overlay()
 
         self.sig_hotkey.connect(self._on_hotkey)
@@ -92,6 +99,7 @@ class Controller(QObject):
         self.sig_launch_done.connect(self._after_launch)
         self.sig_identity.connect(self._on_identity)
         self.sig_chat.connect(self._on_chat)
+        self.sig_stack_done.connect(self._on_stack_done)
 
         self._refresh_timer = QTimer(self, timeout=self._refresh, interval=1000)
         self._auto_timer = QTimer(self, timeout=self._tick,
@@ -128,6 +136,7 @@ class Controller(QObject):
         self._auto_timer.stop()
         self.engine.set_enabled(False)
         self.macros.stop_all()
+        self.stack.cancel()
         self.router.stop()
         self.bridge.stop()
         self.memread.stop()
@@ -209,6 +218,10 @@ class Controller(QObject):
         self.cfg.team = cfg.team
         self.cfg.follow = cfg.follow
         self.follow.load(cfg.follow)
+        self.cfg.stack = cfg.stack
+        self.stack.cfg = cfg.stack
+        self.stacker.load(cfg.stack)
+        self._apply_stack_cfg()
         self.team.reload(cfg)
         self.router.routes = RouteTable(cfg.routes)
         self.router.set_hotkeys(cfg.hotkeys, cfg.macros)
@@ -235,6 +248,8 @@ class Controller(QObject):
             self.follow.follow()
         elif name == "stay":
             self.follow.stay()
+        elif name == "stack":
+            self.stack_on_me()
         elif name == "mirror_movement":
             self.follow.toggle_mirror()
         elif name.startswith("macro:"):
@@ -260,10 +275,59 @@ class Controller(QObject):
         log.info("chat [%s] %s from %s: %s%s", listener, ev.channel, ev.sender, ev.text, cut)
         self.engine.on_chat(slot, ev, time.monotonic(), listener=listener)
 
+    # ------------------------------------------------------------------ stacking
+    def _client_state(self, slot: int) -> ClientState | None:
+        c = self.team.clients.get(slot)
+        return c.state if c and c.attached else None
+
+    def _post_raw(self, slot: int, vk: int, down: bool) -> None:  # stack threads: plain key, no modifiers
+        if hwnd := self.team.hwnd(slot):
+            self.input.post_key(hwnd, vk, down)
+
+    def _apply_stack_cfg(self) -> None:
+        self.follow.stack_on_stop = self.stack.stack_on if self.cfg.stack.on_stop else None
+        self.follow.stack_delay = self.cfg.stack.on_stop_delay
+
+    def stack_on_me(self, anchor: int | None = None) -> None:
+        """Stack everyone on `anchor` (default: the window you're in, else the leader). Again = cancel."""
+        if self.stack.running:
+            self.stack.cancel()
+            log.info("stack: cancelled")
+            return
+        anchor = anchor or self.router.active_slot() or self.team.leader
+        self.stack.stack_on(anchor)
+
+    def _on_stack_done(self, results: list[StackResult]) -> None:
+        for r in results:
+            name = self.team.clients[r.slot].name if r.slot in self.team.clients else str(r.slot)
+            where = f"{r.distance_yards:.2f} yd" if r.distance_yards is not None else "? yd"
+            facing = f"{r.facing_error_deg:.0f}°" if r.facing_error_deg is not None else "?"
+            (log.info if r.ok else log.warning)("stack %s: %s (%s off, facing %s off, %d moves)",
+                                                 name, r.message, where, facing, r.moves)
+        self.sig_changed.emit()
+
+    def wowbox_action(self, origin: int, action: str) -> None:
+        """`/bb stack|follow|stay|mirror` typed in a client."""
+        action = action.strip().lower()
+        if action == "stack":
+            self.stack_on_me(origin)
+        elif action == "follow":
+            self.follow.follow()
+        elif action == "stay":
+            self.follow.stay()
+        elif action == "mirror":
+            self.follow.toggle_mirror()
+        else:
+            log.warning("/bb %s: unknown WoWBox action", action)
+        self.sig_changed.emit()
+
     def team_command(self, origin: int, who: str, text: str) -> list[int]:
         """`/bb all|others|to <who> <command>` typed in the client in slot `origin`: type it in the clients meant."""
         if not self.cfg.bridge.commands:
             log.warning("/bb %s %s ignored: bridge.commands is off", who, text)
+            return []
+        if who == "@wowbox":
+            self.wowbox_action(origin, text)
             return []
         slots = self.team.command_slots(who, origin)
         sender = self.team.clients[origin].name if origin in self.team.clients else str(origin)

@@ -48,6 +48,9 @@ class FollowManager:
         self.router = router
         self.on_change = on_change
         self.active = False
+        self.stack_on_stop: Callable[[int], None] | None = None  # set when stacking is on: mirror + stop -> stack
+        self.stack_delay = 0.4
+        self._stacked_for = -1e9  # the movement we last stacked after
         self._off_since: dict[int, float] = {}  # slot -> when we first saw it not following
         self._last_try: dict[int, float] = {}
         self._wait: dict[int, float] = {}  # slot -> current retry wait (backs off)
@@ -110,6 +113,15 @@ class FollowManager:
 
     # ------------------------------------------------------------------ re-follow
     def tick(self, now: float) -> None:
+        if self.router.mirror and self.stack_on_stop is not None:
+            # mirroring: when you stop, stack everyone on you (replaces re-follow, which would pull them behind you)
+            moved = self.router.last_movement
+            if moved > self._stacked_for and not self.router.movement_held() and now - moved >= self.stack_delay:
+                self._stacked_for = moved
+                anchor = self.router.active_slot()
+                if anchor is not None:
+                    self.stack_on_stop(anchor)
+            return
         if not self.active or not self.cfg.refollow:
             return
         if self.router.movement_held() or now - self.router.last_movement < self.cfg.refollow_delay:

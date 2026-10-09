@@ -68,6 +68,14 @@ function UnitIsAFK(u) return nil end
 function UnitIsPlayer(u) return u == "player" and 1 or nil end
 function IsResting() return nil end
 function IsMounted() return nil end
+POS = { x = 0.25, y = 0.75, facing = 1.5, map = 301, level = 0 }
+mapResets = 0
+function GetPlayerMapPosition(u) return POS.x, POS.y end
+function GetPlayerFacing() return POS.facing end
+function GetCurrentMapAreaID() return POS.map end
+function GetCurrentMapDungeonLevel() return POS.level end
+function SetMapToCurrentZone() mapResets = mapResets + 1 end
+function GetFramerate() return 59.7 end
 """
 
 
@@ -100,6 +108,19 @@ def test_addon_output_decodes():
     assert st.level == 80
     assert st.party_exists == (True, True, False, False)
     assert st.party_health_pct[1] == pytest.approx(10, abs=0.5)
+    assert st.position_ok and st.map_id == 301
+    assert st.map_x == pytest.approx(0.25, abs=1e-4) and st.map_y == pytest.approx(0.75, abs=1e-4)
+    assert st.facing == pytest.approx(1.5, abs=1e-3)
+    assert st.fps == 60
+
+
+def test_addon_position_invalid_in_instances_without_coordinates():
+    lua, g = _load()
+    g.POS.x, g.POS.y = 0, 0
+    st = _draw(g)
+    assert not st.position_ok and st.class_token == "PALADIN"
+    _fire(g, "ZONE_CHANGED_NEW_AREA")
+    assert g.mapResets >= 1
 
 
 def _load():
@@ -195,3 +216,11 @@ def test_addon_team_commands():
                    ("command", "Gnope", "/assist Tinkerdawn")]
     g.now = 10
     assert not isinstance(_draw(g), ChatEvent)
+
+
+def test_addon_wowbox_actions():
+    from wowbox.bridge.decoder import ChatEvent
+    lua, g = _load()
+    g.SlashCmdList["BOXBRIDGE"]("stack")
+    ev = _draw(g)
+    assert isinstance(ev, ChatEvent) and (ev.channel, ev.sender, ev.text) == ("command", "@wowbox", "stack")

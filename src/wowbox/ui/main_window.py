@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import math
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QFont
@@ -17,7 +18,7 @@ from ..layout import LAYOUT_ORDER
 log = logging.getLogger(__name__)
 
 CLIENT_COLS = ["Slot", "Character", "Label", "Role", "PID", "Window", "Status", "Broadcast", "HP", "Power", "Target",
-               "State", "Bridge"]
+               "State", "Position", "Bridge"]
 
 
 def _item(text: str, editable: bool = False) -> QTableWidgetItem:
@@ -93,6 +94,9 @@ class MainWindow(QMainWindow):
         self.b_follow.setToolTip(f"Followers target the leader and /follow, and get put back on follow when it "
                                  f"breaks [{hk.follow}]. Click again (or [{hk.stay}]) to make them stay.")
         self.b_follow.setMinimumWidth(120)
+        self.b_stack = QPushButton(f"Stack [{hk.stack}]", clicked=lambda: self.c.stack_on_me())
+        self.b_stack.setToolTip("Walk everyone onto the exact spot and facing of the window you're in (or the "
+                                "leader). Press again to cancel. Needs BoxBridge positions.")
         self.cb_mirror = QCheckBox(f"Mirror movement [{hk.mirror_movement}]")
         self.cb_mirror.setToolTip("Copy your movement keys (follow.movement_keys) to the followers too")
         self.cb_mirror.toggled.connect(self.c.router.set_mirror)
@@ -101,7 +105,7 @@ class MainWindow(QMainWindow):
         b_reload = QPushButton("Reload config", clicked=self.c.reload_config)
         b_save = QPushButton("Save config", clicked=self.c.save_config)
 
-        for group in ((self.b_broadcast, self.b_follow, self.cb_mirror, self.b_auto, self.cb_dry, self.cb_overlay,
+        for group in ((self.b_broadcast, self.b_follow, self.b_stack, self.cb_mirror, self.b_auto, self.cb_dry, self.cb_overlay,
                        b_release),
                       (b_launch, b_attach, b_arrange, QLabel("Layout:"), self.layout_combo, QLabel("Leader:"),
                        self.leader_combo, b_frames, b_reload, b_save)):
@@ -193,6 +197,8 @@ class MainWindow(QMainWindow):
                             + (" dead" if st.target_dead else "")) if st and st.target_exists and not st.stale
                            else ""),
                 "State": self._flags(st),
+                "Position": (f"{st.map_x * 100:.2f}, {st.map_y * 100:.2f}  {math.degrees(st.facing):.0f}°  {st.fps} fps"
+                             if st and st.position_ok and not st.stale else ""),
                 "Bridge": self._bridge_text(c.slot),
             }
             for col, text in values.items():
@@ -430,6 +436,9 @@ class MainWindow(QMainWindow):
         self.b_auto.setText(f"Automation: {'ON' if auto else 'OFF'}")
         self.b_auto.setStyleSheet("background: #f9a825; font-weight: bold;" if auto else "")
         following = self.c.follow.active
+        stacking = self.c.stack.running
+        self.b_stack.setText("Stacking... (cancel)" if stacking else f"Stack [{self.c.cfg.hotkeys.stack}]")
+        self.b_stack.setStyleSheet("background: #6a1b9a; color: white; font-weight: bold;" if stacking else "")
         self.b_follow.setText(f"Follow: {'ON' if following else 'OFF'}")
         self.b_follow.setStyleSheet("background: #1565c0; color: white; font-weight: bold;" if following else "")
         for cb, value in ((self.cb_overlay, self.c.overlay.isVisible()), (self.cb_dry, self.c.engine.dry_run),

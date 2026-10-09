@@ -13,11 +13,17 @@
 --   /bb cmd <command>       same as all
 --   /bb others <command>    every client except this one         e.g. /bb others follow Tinkerdawn
 --   /bb to <who> <command>  a character name, class:X, role:X, leader or a slot number
+-- WoWBox actions:
+--   /bb stack               everyone walks onto your spot and facing
+--   /bb follow | stay       follow mode on (everyone follows the leader) / off
+--   /bb mirror              movement mirroring on/off
 --                                                                e.g. /bb to Gnope assist Tinkerdawn
 
 local NUM_BYTES = 56
 local NUM_BLOCKS = NUM_BYTES / 2
-local MAGIC_A, MAGIC_B, MAGIC_CHAT = 0xB0, 0x0B, 0x0C
+local MAGIC_A, MAGIC_B, MAGIC_CHAT = 0xB0, 0x0D, 0x0C
+local CLASS_IDS = { WARRIOR = 1, PALADIN = 2, HUNTER = 3, ROGUE = 4, PRIEST = 5, DEATHKNIGHT = 6, SHAMAN = 7,
+  MAGE = 8, WARLOCK = 9, DRUID = 11 }
 local MARK_EVEN, MARK_ODD = 224, 32
 
 local defaults = { enabled = true, size = 8, height = nil, hz = 15, chat = true, chathold = 0.5 }
@@ -119,6 +125,35 @@ local function chatFrame(ev)
   return d
 end
 
+local function u16(out, n)
+  n = math.floor(n + 0.5) % 65536
+  out[#out + 1] = math.floor(n / 256)
+  out[#out + 1] = n % 256
+end
+
+-- map position, facing, map and frame rate, for stacking: 11 bytes (see decoder.py)
+local function addPosition(out)
+  local x, y = GetPlayerMapPosition("player")
+  local mapShown = WorldMapFrame and WorldMapFrame:IsShown() -- you may be looking at another zone's map
+  local valid = x and y and not (x == 0 and y == 0) and not mapShown
+  if not valid then x, y = 0, 0 end
+  local facing = GetPlayerFacing and GetPlayerFacing() or 0
+  local mapId = GetCurrentMapAreaID and GetCurrentMapAreaID() or 0
+  local level = GetCurrentMapDungeonLevel and GetCurrentMapDungeonLevel() or 0
+  u16(out, math.max(0, math.min(1, x)) * 65535)
+  u16(out, math.max(0, math.min(1, y)) * 65535)
+  u16(out, facing / (2 * math.pi) * 65536)
+  u16(out, mapId)
+  out[#out + 1] = level % 256
+  out[#out + 1] = valid and 1 or 0
+  out[#out + 1] = math.min(255, math.floor((GetFramerate and GetFramerate() or 0) + 0.5))
+end
+
+-- GetPlayerMapPosition is relative to the map the world map shows: keep that on the zone you're in
+local function mapToCurrentZone()
+  if SetMapToCurrentZone and not (WorldMapFrame and WorldMapFrame:IsShown()) then SetMapToCurrentZone() end
+end
+
 local function snapshot()
   local tExists = UnitExists("target") and true or false
   local inRaid = GetNumRaidMembers() > 0
@@ -152,7 +187,8 @@ local function snapshot()
     level, partyBits,
   }
   addText(d, UnitName("player"), 24)
-  addText(d, classToken, 12)
+  d[#d + 1] = CLASS_IDS[classToken or ""] or 0
+  addPosition(d)
   return d
 end
 
@@ -232,9 +268,17 @@ events:RegisterEvent("PLAYER_LOGIN")
 events:RegisterEvent("UI_SCALE_CHANGED")
 events:RegisterEvent("DISPLAY_SIZE_CHANGED")
 for event in pairs(CHANNELS) do events:RegisterEvent(event) end
+for _, e in ipairs({ "PLAYER_ENTERING_WORLD", "ZONE_CHANGED", "ZONE_CHANGED_INDOORS", "ZONE_CHANGED_NEW_AREA" }) do
+  events:RegisterEvent(e)
+end
+if WorldMapFrame then WorldMapFrame:HookScript("OnHide", mapToCurrentZone) end
 events:RegisterEvent("AUTOFOLLOW_BEGIN")
 events:RegisterEvent("AUTOFOLLOW_END")
 events:SetScript("OnEvent", function(_, event, msg, sender)
+  if event == "PLAYER_ENTERING_WORLD" or string.find(event, "^ZONE_CHANGED") then
+    mapToCurrentZone()
+    if event ~= "PLAYER_ENTERING_WORLD" then return end
+  end
   if event == "AUTOFOLLOW_BEGIN" or event == "AUTOFOLLOW_END" then
     following = event == "AUTOFOLLOW_BEGIN"
     return
@@ -283,6 +327,14 @@ SlashCmdList["BOXBRIDGE"] = function(msg)
     queueChat(CHANNELS.CHAT_MSG_WHISPER, who, text)
     p("test whisper from " .. who .. ": " .. text)
     return
+  elseif cmd == "stack" or cmd == "follow" or cmd == "stay" or cmd == "mirror" then
+    if not db.enabled then
+      p("BoxBridge is off (/bb to turn it on): WoWBox can't see the command")
+      return
+    end
+    queueChat(COMMAND, "@wowbox", cmd)
+    p("-> WoWBox: " .. cmd)
+    return
   elseif cmd == "all" or cmd == "cmd" or cmd == "others" or cmd == "to" then
     local who, text = cmd == "others" and "others" or "all", arg or ""
     if cmd == "to" then who, text = string.match(text, "^(%S+)%s*(.-)$") end
@@ -307,8 +359,8 @@ SlashCmdList["BOXBRIDGE"] = function(msg)
       tostring(db.height), renderHeight(), db.hz, tostring(db.chat)))
     return
   else
-    p("usage: /bb [all|others <command> | to <who> <command> | size <px> | height <px> | hz <n> | chat | "
-      .. "test <Name> <text> | status]")
+    p("usage: /bb [all|others <command> | to <who> <command> | stack | follow | stay | mirror | size <px> | "
+      .. "height <px> | hz <n> | chat | test <Name> <text> | status]")
     return
   end
   apply()

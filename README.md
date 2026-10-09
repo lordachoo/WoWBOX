@@ -25,7 +25,7 @@ It works from outside the game. WoWBox never injects code into WoW or modifies i
 8. [Targets: choosing which characters](#8-targets-choosing-which-characters)
 9. [Key broadcasting and routes](#9-key-broadcasting-and-routes)
 10. [Team commands from inside the game](#10-team-commands-from-inside-the-game)
-11. [Follow mode and movement mirroring](#11-follow-mode-and-movement-mirroring)
+11. [Follow, stacking and movement mirroring](#11-follow-stacking-and-movement-mirroring)
 12. [Macros](#12-macros)
 13. [Automation](#13-automation)
 14. [Layouts](#14-layouts)
@@ -48,7 +48,8 @@ It works from outside the game. WoWBox never injects code into WoW or modifies i
 | **Character-aware** | Characters are recognised by name, so the warlock lands in its slot whatever order you start the clients in. Targets can be a name, `class:WARLOCK` or `role:healer`. |
 | **Team commands** | Type `/bb all reload` in any client and every client does `/reload`. Also `/bb others …` and `/bb to Gnope …`. |
 | **Follow mode** | One key puts everyone on `/follow`. WoWBox re-follows anyone whose follow breaks, but not mid-cast or mid-fight. |
-| **Movement mirroring** | Optionally copies your W/A/S/D/Q/E/Space to the followers, so they move with you instead of trailing behind. |
+| **Stacking** | One key walks every follower onto your exact spot and facing (within about half a yard and a few degrees), using positions from BoxBridge. |
+| **Movement mirroring** | Optionally copies your W/A/S/D/Q/E/Space to the followers, so they move in lockstep with you. They re-stack every time you stop. |
 | **Macros** | A hotkey runs a sequence: type `/assist Tinkerdawn` on Gnope, then press 1–9 and 0 a second apart. |
 | **Automation** | Rules triggered by state ("healer mana < 40 % and out of combat → drink"), by timers, or by chat ("Tinkerdawn whispers *heal* → Kunth heals him"). Off and in dry run by default. |
 | **Safety switches** | Broadcast toggle, release-all-keys panic button, automation kill switch, chat guard, an always-on-top status overlay. |
@@ -126,6 +127,9 @@ All in-game commands (`/bb` is short for `/boxbridge`):
 | `/bb cmd <command>` | Same as `all`. |
 | `/bb others <command>` | Every client except this one. `/bb others follow Tinkerdawn` |
 | `/bb to <who> <command>` | Only `<who>`: a character name, `class:X`, `role:X`, `leader`, or a slot number. `/bb to Gnope assist Tinkerdawn` |
+| `/bb stack` | Everyone walks onto *your* spot and facing (the client you typed it in). |
+| `/bb follow`, `/bb stay` | Follow mode on / off. |
+| `/bb mirror` | Movement mirroring on / off. |
 | `/bb` | Turn the strip on or off. |
 | `/bb status` | Show the current settings. |
 | `/bb size <px>` | Block size, 2–32 (default 8). Bigger copes better with small windows. Also set `bridge.block_size` in `team.yaml` to match. |
@@ -160,6 +164,7 @@ On start, WoWBox attaches to every running `Wow.exe` window. It puts each window
 |---|---|
 | **Broadcast ON/OFF** | Master switch for key broadcasting (ScrollLock). Turning it off releases every key. |
 | **Follow ON/OFF** | Follow mode (F10 on, F11 off). Section 11. |
+| **Stack** | Everyone walks onto the spot and facing of the window you're in (F12). Press again to cancel. |
 | **Mirror movement** | Copy movement keys to followers (Ctrl+Alt+M). |
 | **Automation ON/OFF**, **Dry run** | Automation always starts OFF, in dry run. |
 | **Overlay** | Small always-on-top status line: broadcast, active character, follow, automation. |
@@ -189,6 +194,7 @@ Hotkeys work while a WoW client or WoWBox has focus. Change them under `hotkeys:
 | Ctrl+Alt+Pause | release all keys (stuck-key panic button) |
 | F10 | **follow**: followers target the leader and `/follow`; follow mode ON |
 | F11 | **stay**: followers stop; follow mode OFF |
+| F12 | **stack**: everyone walks onto the spot and facing of the window you're in |
 | Ctrl+Alt+M | movement mirroring on/off |
 | Ctrl+Alt+L | next layout |
 | Ctrl+Alt+N | next client becomes main (main_thumbs / tabs) |
@@ -284,7 +290,7 @@ Type a `/bb` command in any client's chat, and WoWBox types that command into th
 - **Protected spells** (`/cast`, `/target`) work, because they are really typed into the chat box, just as if you typed them.
 - **Turning it off:** set `bridge.commands: false` to ignore all `/bb` team commands.
 
-## 11. Follow mode and movement mirroring
+## 11. Follow, stacking and movement mirroring
 
 WoW's `/follow` breaks constantly: a cast, a mount, a door, a jump, a loading screen. Follow mode keeps followers on it.
 
@@ -296,10 +302,52 @@ WoW's `/follow` breaks constantly: a cast, a mount, a door, a jump, a loading sc
 
   If re-following keeps failing (leader out of range, say), the waits grow: 2, 4, 8 … up to 15 s.
 - **F11, stay.** Taps `S` on the followers, which breaks their follow, and turns follow mode OFF.
-- **Ctrl+Alt+M, mirror movement.** Your movement keys (`follow.movement_keys`: W A S D Q E Space) also go to the followers. They start, stop, strafe, turn and jump the moment you do. With follow mode on as well, they move in lockstep while you move and snap back onto `/follow` when you stop, which pulls in anyone who drifted.
-  - **Paths won't be identical.** Characters start in different spots, hit different obstacles, and mouse turning (right-drag) isn't copied. Turn with A/D while mirroring.
+- **Ctrl+Alt+M, mirror movement.** Your movement keys (`follow.movement_keys`: W A S D Q E Space) also go to the followers. They start, stop, strafe, turn and jump the moment you do. When you stop, they restack on you (see Stacking below). If stacking is off, they `/follow` again instead.
+  - **Stack first.** Mirrored keys only give the same path if everyone starts stacked and faces the same way.
+  - **Turn with A/D.** Mouse turning (right-drag) isn't copied.
+  - **Obstacles still split them.** Anyone who hits a corner differently drifts, and the next stop fixes it.
   - **Test first.** Some clients don't take held movement keys while in the background. Try a short walk.
 - **Using an in-game macro instead.** Set `follow.start_key` / `follow.refollow_key` to a key bound to an in-game `/follow` macro, and WoWBox presses that key instead of typing.
+
+### Stacking
+
+Mirrored movement only stays together if everyone starts on the same spot, facing the same way. Even 5° of difference becomes 2 yards after a 20-yard run. **Stack (F12, the Stack button, or `/bb stack`)** puts them there:
+
+1. BoxBridge reports every character's map position, facing and frame rate (the **Position** column in the Clients tab).
+2. For each follower, WoWBox:
+   - turns it with A/D to face the way the anchor faces;
+   - moves it without turning: W/S along its facing, Q/E sideways;
+   - after every move, waits for a fresh reading and corrects again.
+3. It usually finishes in 1–5 seconds, within about **half a yard and 3°**. All followers stack at the same time.
+
+More details:
+- **No speeds are guessed.** The first move of each kind is a short probe. From then on, WoWBox measures how fast each key moves or turns the character on this map and uses that.
+- **The anchor** is the window you're in when you press F12, or the client where you typed `/bb stack`. If you press F12 in WoWBox itself, the leader is the anchor.
+- **Mirroring plus stacking is lockstep.** With mirroring on, the followers restack every time you stop moving (`stack.on_stop`). This replaces `/follow` while mirroring, because follow would pull them behind you. Press your movement keys and they move with you. Stop, and any drift is corrected within a second or two.
+- **You can always take over.** Pressing a movement key yourself cancels a running stack. So does pressing F12 again.
+- **Frame rate matters.** WoW only notices a key on its next frame, so a character can't turn less than one frame's worth. At 60 fps that's 3°. At 20 fps it's 9°, and stacking widens its tolerance to match. Background WoW windows often run at a reduced frame rate, so raise it on every client once:
+  ```
+  /bb all console maxfpsbk 60
+  ```
+  Check the frame rates in the Position column.
+- **Where it works:** anywhere the client gives map coordinates. That includes the EQ zones on your server (tested with `GetPlayerMapPosition`). In a place without coordinates, the Position column stays empty and stacking reports "no map position". Use follow there.
+- **Keep the world map closed.** Positions are relative to the map being shown, so while a client has its world map open, that client reports no position.
+- **Mounted, walking or slowed:** the measured speed adapts. Tolerances in yards assume the normal 7 yd/s run speed (`stack.run_speed`).
+- **Turning keys:** stacking needs keyboard turning. A and D must be bound to turn left and turn right (WoW's default), not to strafe. If yours differ, set `stack.turn_left`, `stack.turn_right`, `stack.forward`, `stack.back`, `stack.strafe_left` and `stack.strafe_right`.
+
+```yaml
+stack:
+  who: all                  # who gets stacked; the anchor is always left out
+  on_stop: true             # while mirroring, re-stack whenever you stop
+  on_stop_delay: 400ms
+  tolerance_yards: 0.5
+  facing_tolerance_deg: 3   # widened automatically for low frame rates
+  timeout: 10s
+  run_speed: 7.0
+  map_aspect: 1.5           # zone maps are 3:2
+```
+
+### Follow settings
 
 ```yaml
 follow:
@@ -370,7 +418,7 @@ automation:
 
 - **`slot`:** a number, a list, `any` (the default) or `all`.
 - **Every other key** is a bridge field. Add `_lt`, `_lte`, `_gt`, `_gte` or `_ne` to compare.
-- **Fields:** `health_pct`, `power_pct`, `power_type`, `target_exists`, `target_hostile`, `target_dead`, `target_is_player`, `target_in_combat`, `target_health_pct`, `combat`, `resting`, `in_party`, `in_raid`, `typing`, `chat_open`, `casting`, `channeling`, `mounted`, `dead`, `ghost`, `afk`, `following`, `level`.
+- **Fields:** `health_pct`, `power_pct`, `power_type`, `target_exists`, `target_hostile`, `target_dead`, `target_is_player`, `target_in_combat`, `target_health_pct`, `combat`, `resting`, `in_party`, `in_raid`, `typing`, `chat_open`, `casting`, `channeling`, `mounted`, `dead`, `ghost`, `afk`, `following`, `level`, `position_ok`, `map_x`, `map_y`, `facing`, `map_id`, `fps`.
 
 ### Timers: `every:`
 
@@ -450,9 +498,9 @@ Everything lives in `config\team.yaml`. The exe uses `config\team.yaml` next to 
 | `client` | `exe`, `args`, `set_windowed_cvars`, `resolution`, `launch_stagger` (3s), `window_timeout` (120s), `rename_windows` |
 | `team` | `leader`, `slots: {n: {label, role, character}}` |
 | `layout` | `default`, `monitor`, `thumbs_monitor`, `thumb_strip` (0.22), `tab_bar_height` |
-| `hotkeys` | `toggle_broadcast`, `release_all`, `follow`, `stay`, `mirror_movement`, `cycle_layout`, `next_main`, `automation_kill`, `focus_slot: {n: chord}` |
+| `hotkeys` | `toggle_broadcast`, `release_all`, `follow`, `stay`, `stack`, `mirror_movement`, `cycle_layout`, `next_main`, `automation_kill`, `focus_slot: {n: chord}` |
 | `broadcast` | `enabled_on_start`, `chatguard`, `chatguard_open_keys`, `chatguard_close_keys`, `modifier_mode` (post / focus_swap / strip), `focus_swap_dwell`, `only_when_wow_focused` |
-| `follow` | section 11 |
+| `follow`, `stack` | section 11 |
 | `routes` | list of `{keys, to, note}` (section 9) |
 | `bridge` | `enabled`, `hz` (10), `block_size` (8, match `/bb size`), `method` (auto / mss / dxcam / printwindow), `stale_after` (1.5s), `commands` (true) |
 | `macros` | section 12 |
@@ -490,6 +538,7 @@ src/wowbox/
   team.py               slots, clients, target resolution
   launcher.py           launch / attach / track clients
   follow.py             follow mode, re-follow, movement mirroring
+  stack.py              stacking: the position/facing control loop
   router/               keyboard hook → route table → sender thread; chat guard
   bridge/               pixel decoder (state + chat + commands) and capture poller
   automation/           steps, macro runner, rule engine
@@ -529,6 +578,9 @@ They use fake Win32 implementations, so nothing touches real windows.
 | `/bb all …` does nothing | Is WoWBox running and attached, and does the Clients tab show live stats for that client? Is the command ≤ 27 bytes? Check the Log tab. |
 | Follow mode doesn't re-follow | Does the State column show `following` while a character follows? If not, `/reload` that client for the current addon. Re-follow also waits during combat or casting, and for the window you're in. |
 | Mirrored movement does nothing in background windows | That client ignores posted movement keys. Use follow mode without mirroring. |
+| Stack fails with "no map position" | No coordinates in that area, or that client's world map is open. |
+| Stack ends a few degrees off, or slowly | Low background frame rate: `/bb all console maxfpsbk 60`, and check fps in the Position column. |
+| Stack turns the wrong way or strafes instead of turning | A/D aren't bound to turn left/right on that character. Set the `stack.*` keys. |
 | Game blurry or stretched | Set the in-game resolution to the window size (section 14). |
 | Black screen after arranging | D3D device reset. Arrange at character select, or use Restore frames. |
 | Black thumbnails | DWM can't show minimized windows. Don't minimize in main_thumbs. |
@@ -536,7 +588,7 @@ They use fake Win32 implementations, so nothing touches real windows.
 
 ## 19. Known limits
 
-- **Not yet tested in a live game:** typing into background clients (`type:` steps, `/bb` commands, follow), held movement keys in background clients (mirroring), and modifier chords under `post`. If one of them fails on your client, the fallbacks are in-game macros on keys and `modifier_mode: focus_swap`.
+- **Not yet tested in a live game:** stacking, and modifier chords under `post`. Stacking was tested against a simulation of WoW movement at 10–60 fps. `/bb` commands, typed steps and mirrored movement have worked in a live game. If modifier chords fail on followers, use `modifier_mode: focus_swap`.
 - **Mouse input** isn't broadcast or mirrored.
 - **Bridge size limits:** the strip carries 54 bytes per frame, which is why chat lines and commands are cut to 27 bytes.
 - **Covered windows** fall back to PrintWindow. That's slower, but works.

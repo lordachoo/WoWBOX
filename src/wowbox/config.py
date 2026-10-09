@@ -109,6 +109,7 @@ class HotkeyConfig(_Model):
     follow: ChordStr | None = "F10"  # followers target the leader and /follow; follow mode ON
     stay: ChordStr | None = "F11"  # followers stop where they are; follow mode OFF
     mirror_movement: ChordStr | None = "Ctrl+Alt+M"  # toggle copying your movement keys to followers
+    stack: ChordStr | None = "F12"  # walk everyone onto the spot and facing of the window you're in
     focus_slot: dict[int, ChordStr] = {}  # e.g. {1: "Ctrl+Alt+1"}
 
 
@@ -271,6 +272,25 @@ class FollowConfig(_Model):
         return v
 
 
+class StackConfig(_Model):
+    """Stacking: walk followers onto one character's exact spot and facing, using BoxBridge positions."""
+    who: Target = "all"  # who gets stacked (the character they stack on is always left out)
+    on_stop: bool = True  # while mirroring movement: re-stack every time you stop moving
+    on_stop_delay: Duration = 0.4  # how long you must have stopped first
+    tolerance_yards: float = 0.5
+    facing_tolerance_deg: float = 3.0
+    timeout: Duration = 10.0  # give up on a follower after this long
+    run_speed: float = 7.0  # yards/s, to turn the measured speed into yards (unmounted run)
+    turn_rate_deg: float = 180.0  # first guess for keyboard turning; measured as it goes
+    map_aspect: float = 1.5  # zone map width/height in yards per map unit (WoW zone maps are 3:2)
+    forward: ChordStr = "W"
+    back: ChordStr = "S"
+    strafe_left: ChordStr = "Q"
+    strafe_right: ChordStr = "E"
+    turn_left: ChordStr = "A"
+    turn_right: ChordStr = "D"
+
+
 class AppConfig(_Model):
     client: ClientConfig = ClientConfig()
     team: TeamConfig = TeamConfig()
@@ -278,6 +298,7 @@ class AppConfig(_Model):
     hotkeys: HotkeyConfig = HotkeyConfig()
     broadcast: BroadcastConfig = BroadcastConfig()
     follow: FollowConfig = FollowConfig()
+    stack: StackConfig = StackConfig()
     routes: list[RouteConfig] = []
     bridge: BridgeConfig = BridgeConfig()
     macros: list[MacroConfig] = []

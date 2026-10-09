@@ -7,15 +7,23 @@ those edges rather than assuming a width, so it works however the game stretches
 
 Byte stream (2 bytes per block):
 
-     0  0xB0 magic           1  0x0B magic           2  frame counter
+     0  0xB0 magic           1  0x0D magic           2  frame counter
      3  health 0-255         4  power 0-255          5  power type
      6  target health        7  target flags         8  player flags
      9  input flags         10  cast flags          11  status flags
     12  party1 health       13  party2 health       14  party3 health    15  party4 health
     16  level               17  party-exists bits
     18-41  character name, UTF-8, zero padded (24 bytes)
-    42-53  class token (e.g. PALADIN), zero padded (12 bytes)
+    42  class (CLASS_IDS)
+    43-44  map x, 0-65535 = 0.0-1.0 (GetPlayerMapPosition; high byte first)
+    45-46  map y, same
+    47-48  facing, 0-65535 = 0-2pi radians (GetPlayerFacing: 0 = north, counter-clockwise)
+    49-50  map area id (GetCurrentMapAreaID)     51  map dungeon level
+    52  position flags (bit 0: position valid)  53  frames per second (GetFramerate, max 255)
     54  sum(bytes 0..53) % 256                      55  xor(bytes 0..53)
+
+Older addons sent 0x0B as the second magic byte with a 12-byte class token in 42-53 and no position;
+those frames still decode.
 
 Chat frames use the same strip with 0x0C as the second magic byte. The addon shows one for each chat line
 it hears, held for about half a second, between normal state frames:
@@ -29,13 +37,18 @@ it hears, held for about half a second, between normal state frames:
 """
 from __future__ import annotations
 
+import math
 import time
 from dataclasses import dataclass, field, fields
 
 import numpy as np
 
 MAGIC = (0xB0, 0x0B)
-KIND_STATE, KIND_CHAT = 0x0B, 0x0C
+KIND_STATE_V1, KIND_CHAT, KIND_STATE = 0x0B, 0x0C, 0x0D
+CLASS_IDS = {"WARRIOR": 1, "PALADIN": 2, "HUNTER": 3, "ROGUE": 4, "PRIEST": 5, "DEATHKNIGHT": 6, "SHAMAN": 7,
+             "MAGE": 8, "WARLOCK": 9, "DRUID": 11}
+CLASS_TOKENS = {v: k for k, v in CLASS_IDS.items()}
+POS_VALID = 1
 MARK_EVEN, MARK_ODD = 224, 32
 NAME_BYTES = slice(18, 42)
 CLASS_BYTES = slice(42, 54)
@@ -99,6 +112,13 @@ class ClientState:
     ghost: bool = False
     afk: bool = False
     following: bool = False  # on /follow (AUTOFOLLOW_BEGIN .. AUTOFOLLOW_END)
+    position_ok: bool = False  # map_x/map_y/facing/map_id are valid
+    map_x: float = 0.0  # 0-1 across the current zone map, west to east
+    map_y: float = 0.0  # 0-1, north to south
+    facing: float = 0.0  # radians, 0 = north, counter-clockwise
+    map_id: int = 0
+    map_level: int = 0
+    fps: int = 0  # the client's frame rate: keys only register once per frame
     level: int = 0
     party_health_pct: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
     party_exists: tuple[bool, bool, bool, bool] = (False, False, False, False)
@@ -152,7 +172,7 @@ def _runs(row: np.ndarray, tol: int) -> list[tuple[int, int]]:
 
 
 def _header(px: np.ndarray, tol: int) -> tuple[int, int, int] | None:
-    for kind in (KIND_STATE, KIND_CHAT):
+    for kind in (KIND_STATE, KIND_CHAT, KIND_STATE_V1):
         if _close(px, (MAGIC[0], kind, MARK_EVEN), tol):
             return MAGIC[0], kind, MARK_EVEN
     return None
@@ -231,21 +251,40 @@ def _to_state(d: bytes) -> ClientState:
         level=d[16],
         party_exists=tuple(bool(pbits & (1 << i)) for i in range(4)),  # type: ignore[arg-type]
         name=_text(d[NAME_BYTES]),
-        class_token=_text(d[CLASS_BYTES]),
+        class_token=_text(d[CLASS_BYTES]) if d[1] == KIND_STATE_V1 else CLASS_TOKENS.get(d[42], ""),
+        **({} if d[1] == KIND_STATE_V1 else _position(d)),
     )
+
+
+def _u16(d: bytes, i: int) -> int:
+    return d[i] * 256 + d[i + 1]
+
+
+def _position(d: bytes) -> dict:
+    return dict(position_ok=bool(d[52] & POS_VALID), map_x=_u16(d, 43) / 65535.0, map_y=_u16(d, 45) / 65535.0,
+                facing=_u16(d, 47) / 65536.0 * 2 * math.pi, map_id=_u16(d, 49), map_level=d[51], fps=d[53])
 
 
 def encode_bytes(values: dict, frame: int) -> list[int]:
     """Reference encoder (mirrors the Lua addon)."""
     v = values
     party = list(v.get("party", [0, 0, 0, 0]))
-    data = [MAGIC[0], MAGIC[1], frame % 256,
+    data = [MAGIC[0], KIND_STATE, frame % 256,
             v.get("health", 0), v.get("power", 0), v.get("power_type", 0),
             v.get("target_health", 0), v.get("target_flags", 0), v.get("player_flags", 0),
             v.get("input_flags", 0), v.get("cast_flags", 0), v.get("status_flags", 0),
             *party[:4], v.get("level", 0), v.get("party_bits", 0)]
     data += list(v.get("name", "").encode("utf-8")[:24].ljust(24, b"\0"))
-    data += list(v.get("class", "").encode("utf-8")[:12].ljust(12, b"\0"))
+    data.append(CLASS_IDS.get(v.get("class", ""), 0))
+    pos = v.get("pos")  # (x, y, facing, map_id, level) or None
+    if pos:
+        x, y, facing, map_id, level = pos
+        fx = round(facing / (2 * math.pi) * 65536) % 65536
+        for n in (round(x * 65535), round(y * 65535), fx, map_id):
+            data += [n // 256, n % 256]
+        data += [level, POS_VALID, v.get("fps", 60)]
+    else:
+        data += [0] * 10 + [v.get("fps", 60)]
     data += list(checksum(data))
     assert len(data) == NUM_BYTES
     return data
