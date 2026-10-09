@@ -157,14 +157,15 @@ def test_different_map_and_no_position():
     w.add(2, 503, 500, 0, map_id=2)
     assert "another zone" in stacker(w).stack(2, 1).message
     w2 = World()
-    w2.add(1, 500, 500, 0)
-    w2.add(2, 503, 500, 0)
+    w2.add(1, 500, 500, 1.0)
+    w2.add(2, 503, 500, 4.0)
     s = stacker(w2)
     real_read = w2.read
     w2.read = lambda slot: (st := real_read(slot)) and ClientState(**{**st.__dict__, "position_ok": slot != 2})
     s.read = w2.read
-    r = s.stack(2, 1)
-    assert not r.ok and "no map position" in r.message
+    r = s.stack(2, 1)  # an instance without coordinates: it can still turn to the same facing
+    assert r.ok and "facing matched only" in r.message and r.distance_yards is None
+    assert w2.facing_error_deg(1, 2) < 2.0 and w2.distance(1, 2) == pytest.approx(3)
 
 
 def test_cancel_lets_go_of_keys():

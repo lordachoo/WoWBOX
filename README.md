@@ -337,7 +337,11 @@ More details:
 - **You can always take over.** Pressing a movement key yourself cancels a running stack. So does pressing F12 again.
 - **Only nearby followers are stacked.** A follower in another zone, or more than `stack.max_distance_yards` (40) away, is skipped at once ("in another zone" / "too far away … use follow") instead of being walked across the map. Use F10 (follow) to bring it close first.
 - **Frame rate sets the precision.** See [Frame rate and stacking precision](#frame-rate-and-stacking-precision) below. In short: **run every client at 144 fps** for facing within 1°.
-- **Where it works:** anywhere the client gives map coordinates. That includes the EQ zones on your server (tested with `GetPlayerMapPosition`). In a place without coordinates, the Position column stays empty and stacking reports "no map position". Use follow there.
+- **Where it works:** anywhere the client gives map coordinates. That includes the EQ zones on your server (tested with `GetPlayerMapPosition`). In a place without coordinates (many instances: `GetPlayerMapPosition` gives `0 0` there), the Position column stays empty.
+  - **Stack in those places matches facing only.** Followers turn to your facing, and the log says "facing matched only (no map position here…)". It can't walk them onto your spot.
+  - **To get close first:** use follow (F10) to bring them in, then stay (F11) and stack (F12). Mirrored movement then runs parallel, a yard or two apart instead of exactly on top of you, so drift builds up faster than outdoors. Re-stack often, or use follow for long runs.
+  - **The distance guard can't measure there,** so it doesn't block mirroring. Only a different map ID still counts as another zone.
+  - **To test a spot:** `/run SetMapToCurrentZone() local x,y=GetPlayerMapPosition("player") print(GetCurrentMapAreaID(), x, y, GetPlayerFacing())`. If x and y print `0 0`, there are no coordinates.
 - **Keep the world map closed.** Positions are relative to the map being shown, so while a client has its world map open, that client reports no position.
 - **Mounted, walking or slowed:** the measured speed adapts. Tolerances in yards assume the normal 7 yd/s run speed (`stack.run_speed`).
 - **Turning keys:** stacking needs keyboard turning. A and D must be bound to turn left and turn right (WoW's default), not to strafe. If yours differ, set `stack.turn_left`, `stack.turn_right`, `stack.forward`, `stack.back`, `stack.strafe_left` and `stack.strafe_right`.
@@ -922,7 +926,7 @@ They use fake Win32 implementations, so nothing touches real windows.
 | `/bb all …` does nothing | Is WoWBox running and attached, and does the Clients tab show live stats for that client? Is the command ≤ 27 bytes? Check the Log tab. |
 | Follow mode doesn't re-follow | Does the State column show `following` while a character follows? If not, `/reload` that client for the current addon. Re-follow also waits during combat or casting, and for the window you're in. |
 | Mirrored movement does nothing in background windows | That client ignores posted movement keys. Use follow mode without mirroring. |
-| Stack fails with "no map position" | No coordinates in that area, or that client's world map is open. |
+| Stack says "facing matched only" | No coordinates in that area (many instances), or that client's world map is open. Facing is matched; use follow to get close. |
 | Stack ends a degree or two off | That's half a frame of turning at that client's frame rate (±1.5° at 60 fps). Run at 144 fps: `/bb all console maxfps 144`, `/bb all console maxfpsbk 144`, `/bb all console gxVSync 0`. Check the fps in the Position column. See *Frame rate and stacking precision* (section 11). |
 | Stack turns the wrong way or strafes instead of turning | A/D aren't bound to turn left/right on that character. Set the `stack.*` keys. |
 | Game blurry or stretched | Set the in-game resolution to the window size (section 14). |

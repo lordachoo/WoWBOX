@@ -119,15 +119,15 @@ class Stacker:
                      for name in ("forward", "back", "strafe_left", "strafe_right", "turn_left", "turn_right")}
 
     # ------------------------------------------------------------------ helpers
-    def _pose(self, slot: int) -> ClientState:
+    def _pose(self, slot: int, need_position: bool = True) -> ClientState:
         st = self.read(slot)
         if st is None or st.stale:
             raise StackError("no bridge data")
-        if not st.position_ok:
+        if need_position and not st.position_ok:
             raise StackError("no map position here (an instance without coordinates, or the world map is open)")
         return st
 
-    def _fresh(self, slot: int, cancel: threading.Event) -> ClientState:
+    def _fresh(self, slot: int, cancel: threading.Event, need_position: bool = True) -> ClientState:
         """Wait until the bridge shows a frame drawn after the last move, then return it."""
         st = self.read(slot)
         last = st.frame if st else None
@@ -142,7 +142,7 @@ class Stacker:
                 last = st.frame
             now = self.clock()
             if changes >= FRESH_FRAMES and now - start >= FRESH_MIN:
-                return self._pose(slot)
+                return self._pose(slot, need_position)
             if now - start > FRESH_TIMEOUT:
                 raise StackError("bridge stopped updating")
             self.sleep(0.01)
@@ -247,10 +247,10 @@ class Stacker:
 
     # ------------------------------------------------------------------ turning
     def face(self, slot: int, target: float, cancel: threading.Event, me: ClientState | None = None,
-             tolerance: float | None = None) -> ClientState:
+             tolerance: float | None = None, need_position: bool = True) -> ClientState:
         """Turn to `target` until within `tolerance` (default: the fine facing tolerance), or until the rest is
         less than half a frame of turning."""
-        me = me or self._fresh(slot, cancel)
+        me = me or self._fresh(slot, cancel, need_position)
         for _ in range(10):
             diff = wrap(target - me.facing)
             if abs(diff) <= (tolerance if tolerance is not None else self.facing_tolerance(me)):
@@ -260,7 +260,7 @@ class Stacker:
                 return me  # as close as whole frames get
             key = "turn_left" if diff > 0 else "turn_right"  # turning left raises the facing angle
             held = self._press_frames(slot, key, frames, me, cancel)
-            after = self._fresh(slot, cancel)
+            after = self._fresh(slot, cancel, need_position)
             turned = abs(wrap(after.facing - me.facing))
             if turned > 0 and held >= MIN_LEARN_HOLD:
                 measured = turned / held
@@ -276,6 +276,8 @@ class Stacker:
         moves = 0
         coarse = math.radians(COARSE_FACING_DEG)
         try:
+            if (r := self._facing_only(slot, anchor, cancel)) is not None:
+                return r
             me, target = self._pose(slot), self._pose(anchor)
             if (me.map_id, me.map_level) != (target.map_id, target.map_level):
                 raise StackError("in another zone than the anchor")
@@ -332,6 +334,24 @@ class Stacker:
             except StackError:
                 return StackResult(slot, False, moves=moves, message=str(e))
             return self._result(slot, False, me, target, moves, str(e))
+
+    def _facing_only(self, slot: int, anchor: int, cancel: threading.Event) -> StackResult | None:
+        """Where the game gives no map position (many instances) facing still works: match the anchor's facing,
+        so mirrored movement at least runs parallel. None when positions are there and a full stack can run."""
+        me, target = self.read(slot), self.read(anchor)
+        if me is None or target is None or me.stale or target.stale or (me.position_ok and target.position_ok):
+            return None
+        if me.map_id and target.map_id and (me.map_id, me.map_level) != (target.map_id, target.map_level):
+            return StackResult(slot, False, message="in another zone than the anchor")
+        try:
+            if me.following:  # /follow would turn it back
+                self._press_frames(slot, "back", 1, me, cancel)
+            me = self.face(slot, target.facing, cancel, need_position=False)
+        except StackError as e:
+            return StackResult(slot, False, message=str(e))
+        err = math.degrees(abs(wrap(self.read(anchor).facing - me.facing)))
+        return StackResult(slot, True, None, err, 0,
+                           "facing matched only (no map position here, so it can't walk onto your spot)", fps=me.fps)
 
     def _result(self, slot, ok, me, target, moves, message) -> StackResult:
         upy = self.units_per_yard(me, slot)
