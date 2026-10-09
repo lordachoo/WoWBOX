@@ -555,6 +555,7 @@ The paladin casts Blessing of Kings on everyone in the group, itself included, w
 
 - **Several buffers at once.** Different characters can cast at the same time. For a druid and a shaman in one macro (e.g. Ctrl+3), put the druid's `Mark of the Wild` row and the shaman's self buff (`/cast Water Shield`) next to each other. Give only the second of each pair a *Then wait*, so both cast, then both wait.
 - **Fewer casts:** `/cast Gift of the Wild` (druid) and the *Greater Blessings* (paladin) buff the group, or the class, in one cast, but need reagents.
+- **Empty party spots:** WoWBox still types the line for a spot that's empty (it doesn't know who's in the group). The game then skips the cast because of `exists`, so nothing is cast. Only that row's *Then wait* is spent. To avoid even that, use one row per character by name (`/cast [@Gnope] Blessing of Kings`).
 - **Not in combat:** add `nocombat` to the brackets, e.g. `[@party1,exists,nocombat]`.
 - **Range** is about 30 yards, so stack first (F12).
 - **Spell names** must match the game's exactly, including your server's custom spells.
