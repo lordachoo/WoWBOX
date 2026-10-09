@@ -502,6 +502,44 @@ Every step except `wait`, `sequence` and `macro` takes `to:` (default `all`).
 - **Editing by hand.** Edit `macros.yaml` (or `team.yaml`, before the first editor save), then press **Reload config**.
 - **Tip.** For something you press constantly, an in-game macro bound to a key plus a route (`keys: ["F6"], to: Gnope`) is faster than typing into chat.
 
+### Example: send the pets (Ctrl+1, no in-game macro needed)
+
+Pressing **Ctrl+1** in any WoW window makes the warlock and the shaman assist the tank and send their pets. Nothing is needed on the characters themselves: no in-game macro, no action bar slot, no key binding. WoWBox types the commands.
+
+**In the macro editor** (Macros tab → **New**):
+1. **Name:** `attack with pets`.
+2. **Hotkey:** click the field and press **Ctrl+1**.
+3. Four steps, all *Type chat line*:
+
+   | Step | Value | To |
+   |---|---|---|
+   | Type chat line | `/assist Tinkerdawn` | `class:WARLOCK` |
+   | Type chat line | `/assist Tinkerdawn` | `class:SHAMAN` |
+   | Type chat line | `/petattack` | `class:WARLOCK` |
+   | Type chat line | `/petattack` | `class:SHAMAN` |
+
+4. **Test**, then **Save**.
+
+The same macro in `config/macros.yaml`:
+
+```yaml
+- name: attack with pets
+  key: Ctrl+1
+  do:
+    sequence:
+    - {type: /assist Tinkerdawn, to: 'class:WARLOCK'}
+    - {type: /assist Tinkerdawn, to: 'class:SHAMAN'}
+    - {type: /petattack, to: 'class:WARLOCK'}
+    - {type: /petattack, to: 'class:SHAMAN'}
+```
+
+**Why it's built this way**
+- **Class targets instead of slots.** It finds the warlock and the shaman by class (read live from BoxBridge), whichever slot they're in. A class that isn't logged in is simply skipped. `[2, 3]` works too, but breaks if the slots change.
+- **One class per row.** *To* takes one target, so each command appears once per class. Both assists come first, so both characters have a target before their pets go.
+- **Typed instead of a key press.** `/petattack` is a slash command, so it costs no bar space. It also avoids posting Ctrl+1 to background windows, the one key type not yet confirmed to work there.
+- **Ctrl+1 never reaches the game.** WoWBox takes the hotkey, so the game doesn't see it. If you had a route for `Ctrl+1`, remove it: the macro hotkey wins anyway, but two definitions get confusing. WoWBox waits until you let go of Ctrl, then the four lines take about a second.
+- **More pet commands** work the same way: `/petfollow`, `/petstay`, `/petpassive`, `/petdefensive`, `/petaggressive`, and pet spells with `/cast`, e.g. `/cast Torment`.
+
 ### Using items and casting spells
 
 A `type:` step types any chat line into the chosen characters' chat. WoW handles it exactly as if you typed it, so `/use` and `/cast` work, protected spells included.
