@@ -92,32 +92,39 @@ def row_action(row: dict) -> dict:
     return d
 
 
-def build_macro(name: str, key: str, note: str, rows: list[dict]) -> MacroConfig:
-    """Raises ValueError with a readable message."""
-    if not name.strip():
-        raise ValueError("Give the macro a name.")
+def rows_to_do(rows: list[dict]) -> tuple[dict, list[int]]:
+    """Editor rows -> the `do:` dict, plus for each step the editor row it came from (for error messages).
+    Raises ValueError for an empty table or an empty value."""
     if not rows:
         raise ValueError("Add at least one step.")
     for i, row in enumerate(rows, 1):
         if not row["value"].strip():
             raise ValueError(f"Step {i}: {KIND_LABELS[row['kind']].lower()} needs a value "
                              f"(e.g. {KIND_HINTS[row['kind']].split('   ')[0]}).")
-    steps, step_rows = [], []  # step_rows[i]: the editor row that step i came from (for error messages)
+    steps, step_rows = [], []
     for i, r in enumerate(rows, 1):
         steps.append(row_action(r))
         step_rows.append(i)
         if r.get("then", "").strip() and r["kind"] != "wait":
             steps.append({"wait": r["then"].strip()})
             step_rows.append(i)
-    data = {"name": name.strip(), "key": key or None, "note": note.strip(),
-            "do": steps[0] if len(steps) == 1 else {"sequence": steps}}
+    return (steps[0] if len(steps) == 1 else {"sequence": steps}), step_rows
+
+
+def build_macro(name: str, key: str, note: str, rows: list[dict]) -> MacroConfig:
+    """Raises ValueError with a readable message."""
+    if not name.strip():
+        raise ValueError("Give the macro a name.")
+    do, step_rows = rows_to_do(rows)
+    data = {"name": name.strip(), "key": key or None, "note": note.strip(), "do": do}
     try:
         return MacroConfig.model_validate(data)
     except ValidationError as e:
-        raise ValueError(_explain(e, step_rows)) from None
+        raise ValueError(explain(e, step_rows)) from None
 
 
-def _explain(e: ValidationError, step_rows: list[int]) -> str:
+def explain(e: ValidationError, step_rows: list[int], labels: dict[str, str] | None = None) -> str:
+    """Pydantic errors as "Step 2: ..." lines; `labels` renames other top-level fields (e.g. "every")."""
     msgs = []
     for err in e.errors():
         loc = list(err["loc"])
@@ -127,7 +134,7 @@ def _explain(e: ValidationError, step_rows: list[int]) -> str:
         elif loc[:1] == ["do"] and len(step_rows) == 1:
             where = "Step 1: "
         elif loc:
-            where = f"{loc[0]}: "
+            where = f"{(labels or {}).get(loc[0], loc[0])}: "
         msg = err["msg"].removeprefix("Value error, ")
         msgs.append(where + msg)
     return "\n".join(dict.fromkeys(msgs))
@@ -166,44 +173,21 @@ class HotkeyEdit(QLineEdit):
         return False if self.hasFocus() else super().focusNextPrevChild(nxt)
 
 
-class MacroEditor(QDialog):
-    def __init__(self, parent: QWidget | None, macro: MacroConfig | None, *, targets: list[str],
-                 macro_names: list[str], conflict: Callable[[str], str | None],
-                 on_test: Callable[[MacroConfig], None]) -> None:
-        super().__init__(parent)
-        self.setWindowTitle(f"Edit macro: {macro.name}" if macro else "New macro")
-        self.resize(900, 480)
+class StepTable(QWidget):
+    """The step list shared by the macro and automation editors: Step | Value | To | Key gap | Then wait,
+    with Add / Remove / Move buttons."""
+
+    def __init__(self, targets: list[str], rows: list[dict] | None = None) -> None:
+        super().__init__()
         self.targets = targets
-        self.other_names = macro_names
-        self.conflict = conflict
-        self.on_test = on_test
-        self.result_macro: MacroConfig | None = None
-
-        self.name_edit = QLineEdit(macro.name if macro else "")
-        self.key_edit = HotkeyEdit(macro.key or "" if macro else "")
-        clear = QPushButton("Clear", clicked=lambda: self.key_edit.setText(""))
-        self.key_warning = QLabel()
-        self.key_warning.setStyleSheet("color: #c62828;")
-        self.key_edit.textChanged.connect(self._check_key)
-        key_row = QHBoxLayout()
-        key_row.addWidget(self.key_edit, 1)
-        key_row.addWidget(clear)
-        self.note_edit = QLineEdit(macro.note if macro else "")
-        form = QFormLayout()
-        form.addRow("Name", self.name_edit)
-        form.addRow("Hotkey", key_row)
-        form.addRow("", self.key_warning)
-        form.addRow("Note", self.note_edit)
-
         self.table = QTableWidget(0, len(COLS))
         self.table.setHorizontalHeaderLabels(COLS)
         self.table.verticalHeader().setVisible(True)
         hh = self.table.horizontalHeader()
         hh.setSectionResizeMode(0, QHeaderView.ResizeToContents)
         hh.setSectionResizeMode(1, QHeaderView.Stretch)
-        hh.setSectionResizeMode(2, QHeaderView.Interactive)
-        hh.setSectionResizeMode(3, QHeaderView.Interactive)
-        hh.setSectionResizeMode(4, QHeaderView.Interactive)
+        for col in (2, GAP_COL, THEN_COL):
+            hh.setSectionResizeMode(col, QHeaderView.Interactive)
         self.table.setColumnWidth(2, 170)
         self.table.setColumnWidth(GAP_COL, 70)
         self.table.setColumnWidth(THEN_COL, 80)
@@ -211,43 +195,18 @@ class MacroEditor(QDialog):
             "Press keys only: the gap between the keys (default 250ms)")
         self.table.horizontalHeaderItem(THEN_COL).setToolTip(
             "A pause after this step, e.g. 1.6s between two casts (global cooldown)")
-        self.rows: list[dict] = macro_rows(macro) if macro else [new_row()]
-
-        step_buttons = QHBoxLayout()
+        self.rows: list[dict] = rows or [new_row()]
+        buttons = QHBoxLayout()
         for text, fn in (("Add step", self.add_row), ("Remove", self.remove_row), ("Move up", lambda: self.move(-1)),
                          ("Move down", lambda: self.move(1))):
-            step_buttons.addWidget(QPushButton(text, clicked=fn))
-        step_buttons.addStretch(1)
-
-        self.error = QLabel()
-        self.error.setStyleSheet("color: #c62828;")
-        self.error.setWordWrap(True)
-        hint = QLabel("To: all, followers (everyone but the window you're in), leader, not:leader, a character "
-                      "name, class:WARLOCK, role:healer, or slots like [2, 3]. Two casts on one character need a "
-                      "Wait of about 1.5s between them (global cooldown).")
-        hint.setWordWrap(True)
-        hint.setStyleSheet("color: gray;")
-
-        bottom = QHBoxLayout()
-        bottom.addWidget(QPushButton("Test (run now)", clicked=self.test))
-        bottom.addStretch(1)
-        save = QPushButton("Save", clicked=self.save)
-        save.setDefault(True)
-        bottom.addWidget(save)
-        bottom.addWidget(QPushButton("Cancel", clicked=self.reject))
-
+            buttons.addWidget(QPushButton(text, clicked=fn))
+        buttons.addStretch(1)
         lay = QVBoxLayout(self)
-        lay.addLayout(form)
-        lay.addWidget(QLabel("Steps (run top to bottom):"))
+        lay.setContentsMargins(0, 0, 0, 0)
         lay.addWidget(self.table, 1)
-        lay.addLayout(step_buttons)
-        lay.addWidget(hint)
-        lay.addWidget(self.error)
-        lay.addLayout(bottom)
+        lay.addLayout(buttons)
         self.render()
-        self._check_key(self.key_edit.text())
 
-    # ------------------------------------------------------------------ rows
     def render(self) -> None:
         t = self.table
         t.setRowCount(len(self.rows))
@@ -318,6 +277,81 @@ class MacroEditor(QDialog):
             self.rows[r], self.rows[r + delta] = self.rows[r + delta], self.rows[r]
             self.render()
             self.table.setCurrentCell(r + delta, 1)
+
+
+TO_HINT = ("To: all, followers (everyone but the window you're in), leader, not:leader, a character name, "
+           "class:WARLOCK, role:healer, or slots like [2, 3]. Two casts on one character need about 1.6s "
+           "between them (Then wait) for the global cooldown.")
+
+
+class MacroEditor(QDialog):
+    def __init__(self, parent: QWidget | None, macro: MacroConfig | None, *, targets: list[str],
+                 macro_names: list[str], conflict: Callable[[str], str | None],
+                 on_test: Callable[[MacroConfig], None]) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(f"Edit macro: {macro.name}" if macro else "New macro")
+        self.resize(900, 480)
+        self.targets = targets
+        self.other_names = macro_names
+        self.conflict = conflict
+        self.on_test = on_test
+        self.result_macro: MacroConfig | None = None
+
+        self.name_edit = QLineEdit(macro.name if macro else "")
+        self.key_edit = HotkeyEdit(macro.key or "" if macro else "")
+        clear = QPushButton("Clear", clicked=lambda: self.key_edit.setText(""))
+        self.key_warning = QLabel()
+        self.key_warning.setStyleSheet("color: #c62828;")
+        self.key_edit.textChanged.connect(self._check_key)
+        key_row = QHBoxLayout()
+        key_row.addWidget(self.key_edit, 1)
+        key_row.addWidget(clear)
+        self.note_edit = QLineEdit(macro.note if macro else "")
+        form = QFormLayout()
+        form.addRow("Name", self.name_edit)
+        form.addRow("Hotkey", key_row)
+        form.addRow("", self.key_warning)
+        form.addRow("Note", self.note_edit)
+
+        self.steps = StepTable(targets, macro_rows(macro) if macro else None)
+        self.table = self.steps.table
+
+        self.error = QLabel()
+        self.error.setStyleSheet("color: #c62828;")
+        self.error.setWordWrap(True)
+        hint = QLabel(TO_HINT)
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: gray;")
+
+        bottom = QHBoxLayout()
+        bottom.addWidget(QPushButton("Test (run now)", clicked=self.test))
+        bottom.addStretch(1)
+        save = QPushButton("Save", clicked=self.save)
+        save.setDefault(True)
+        bottom.addWidget(save)
+        bottom.addWidget(QPushButton("Cancel", clicked=self.reject))
+
+        lay = QVBoxLayout(self)
+        lay.addLayout(form)
+        lay.addWidget(QLabel("Steps (run top to bottom):"))
+        lay.addWidget(self.steps, 1)
+        lay.addWidget(hint)
+        lay.addWidget(self.error)
+        lay.addLayout(bottom)
+        self._check_key(self.key_edit.text())
+
+    # the step table's API, as the macro editor's (used by tests and the window)
+    def read(self) -> list[dict]:
+        return self.steps.read()
+
+    def add_row(self) -> None:
+        self.steps.add_row()
+
+    def remove_row(self) -> None:
+        self.steps.remove_row()
+
+    def move(self, delta: int) -> None:
+        self.steps.move(delta)
 
     # ------------------------------------------------------------------ result
     def _check_key(self, text: str) -> None:

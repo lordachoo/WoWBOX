@@ -334,6 +334,13 @@ def load_config(path: str | Path) -> AppConfig:
             log.warning("%s has a macros: section; it's ignored because %s exists",
                                                 path.name, macros_file.name)
         data["macros"] = mdata.get("macros") or []
+    rules_file = path.with_name("automation.yaml")
+    if rules_file.exists():
+        rdata = yaml.safe_load(rules_file.read_text(encoding="utf-8")) or {}
+        if data.get("automation"):
+            log.warning("%s has an automation: section; it's ignored because %s exists",
+                        path.name, rules_file.name)
+        data["automation"] = rdata.get("automation") or []
     return AppConfig.model_validate(data)
 
 
@@ -345,4 +352,6 @@ def save_config(cfg: AppConfig, path: str | Path) -> None:
     data = cfg.model_dump(mode="json", exclude_none=True)
     if path.with_name("macros.yaml").exists():
         data.pop("macros", None)  # they live in macros.yaml
+    if path.with_name("automation.yaml").exists():
+        data.pop("automation", None)  # they live in automation.yaml
     path.write_text(yaml.safe_dump(data, sort_keys=False, allow_unicode=True), encoding="utf-8")

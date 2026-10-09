@@ -10,11 +10,13 @@ from typing import Callable
 from PySide6.QtCore import QObject, QTimer, Signal
 
 from .automation import AutomationEngine
+from .automation.engine import condition_report
 from .automation.macros import MacroRunner
 from .commands import TeamCommands
-from .config import MacroConfig
+from .config import AutomationRule, MacroConfig
 from .keys import parse_chord
-from .macro_store import macros_path, migrate, save_macros
+from .macro_store import fmt_duration, macros_path, migrate, save_macros
+from .rule_store import automation_path, migrate_rules, save_rules
 from .follow import FollowManager
 from .stack import Stacker, StackManager, StackResult, apart
 from .bridge import BridgePoller, ChatEvent, ClientState
@@ -342,6 +344,108 @@ class Controller(QObject):
         if hasattr(self, "window"):
             self.window.load_macros()
         self.sig_changed.emit()
+
+    # ------------------------------------------------------------------ automation rules (the editor)
+    def save_rule(self, old_name: str | None, rule: AutomationRule) -> None:
+        """Add (old_name None) or replace a rule, write automation.yaml, and use it right away."""
+        rules = list(self.cfg.automation)
+        names = [r.name for r in rules]
+        if rule.name != old_name and rule.name in names:
+            raise ValueError(f"There's already a rule called {rule.name!r}.")
+        if old_name in names:
+            rules[names.index(old_name)] = rule
+        else:
+            rules.append(rule)
+        self._store_rules(rules)
+        log.info("automation rule %r saved", rule.name)
+
+    def delete_rule(self, name: str) -> None:
+        self._store_rules([r for r in self.cfg.automation if r.name != name])
+        log.info("automation rule %r deleted", name)
+
+    def set_rule_enabled(self, name: str, on: bool) -> None:
+        self._store_rules([r.model_copy(update={"enabled": on}) if r.name == name else r
+                           for r in self.cfg.automation])
+        log.info("automation rule %r %s", name, "enabled" if on else "disabled")
+
+    def _store_rules(self, rules: list[AutomationRule]) -> None:
+        path = automation_path(self.cfg_path)
+        if path.exists():
+            save_rules(path, rules)
+        else:
+            migrate_rules(self.cfg_path, rules)  # first edit: rules move out of team.yaml
+            log.info("automation rules are now kept in %s (team.yaml is left as you wrote it)", path)
+        self.cfg.automation = rules
+        self.engine.load(rules)
+        if hasattr(self, "window"):
+            self.window.load_automation()
+        self.sig_changed.emit()
+
+    def who_choices(self) -> list[str]:
+        return ["any", "all"] + [f"{c.slot} ({c.name})" for c in self.team.attached()]
+
+    def rule_preview(self, rule: AutomationRule) -> str:
+        """The editor's live check: what this rule would do right now, in words (HTML)."""
+        names = {c.slot: c.name for c in self.team.clients.values()}
+        lines = []
+        if rule.chat is not None:
+            ch = rule.chat
+            heard = [names.get(s, str(s)) for s in self.team.resolve(ch.heard_by, self.router.active_slot())]
+            src = f"from {', '.join(ch.sender)}" if ch.sender else "from <b>anyone</b>"
+            words = f" containing {' or '.join(repr(w) for w in ch.contains)}" if ch.contains else ""
+            lines.append(f"Fires on a {'/'.join(ch.channel)} line {src}{words}, heard by "
+                         f"{', '.join(heard) if heard else '<b>nobody</b> (check Heard by)'}.")
+        if rule.when is not None:
+            ok, per = condition_report(rule.when, self.states())
+            who = " · ".join(f"{names.get(s, s)}: " + ("<span style='color:#2e7d32'>matches</span>" if m
+                                                          else f"no ({why})") for s, m, why in per)
+            head = "<b style='color:#2e7d32'>Condition is TRUE now</b>" if ok else "<b>Condition is false now</b>"
+            lines.append(f"{head}{' (the chat line must also come in)' if rule.chat else ''}: {who or 'no characters'}")
+        if rule.every is not None:
+            lines.append(f"Fires every {fmt_duration(rule.every)}, the first time {fmt_duration(rule.every)} after "
+                         f"automation is turned on.")
+        if rule.cooldown:
+            lines.append(f"At most once every {fmt_duration(rule.cooldown)}.")
+        e = self.engine
+        if not rule.enabled:
+            lines.append("This rule is <b>disabled</b>: it never fires until you tick Enabled.")
+        if not e.enabled:
+            lines.append("Automation is <b>OFF</b> (toolbar): nothing fires while it's off.")
+        elif e.dry_run:
+            lines.append("Automation is ON in <b>dry run</b>: firings are only logged.")
+        else:
+            lines.append("Automation is ON and <b>live</b>: a firing really sends the steps.")
+        return "<br>".join(lines)
+
+    def test_rule(self, rule: AutomationRule) -> str:
+        """The editor's Test: what one firing would send, without sending anything (also logged)."""
+        from .automation.actions import MacroStep, SendStep, TypeStep, WaitStep, flatten, substitute
+        steps = flatten(rule.do)
+        if rule.chat is not None:
+            ch = rule.chat
+            sample = {"sender": (ch.sender or ["Someone"])[0], "message": (ch.contains or ["hello"])[0],
+                      "channel": ch.channel[0], "listener": self.team.clients[self.team.leader].name}
+            steps = substitute(steps, sample)
+            intro = f"Test: a {sample['channel']} from {sample['sender']} saying {sample['message']!r} would do:"
+        else:
+            intro = "Test: one firing would do:"
+        out = [intro]
+        names = {c.slot: c.name for c in self.team.clients.values()}
+        for st in steps:
+            if isinstance(st, WaitStep):
+                out.append(f"  wait {fmt_duration(st.seconds)}")
+            elif isinstance(st, MacroStep):
+                out.append(f"  start macro {st.name!r}")
+            else:
+                slots = self.team.resolve(st.to, self.router.active_slot())
+                who = ", ".join(names.get(s, str(s)) for s in slots) or "NOBODY (no character matches To)"
+                what = f"type {st.text!r}" if isinstance(st, TypeStep) else f"press {st.chord}"
+                out.append(f"  {what} -> {who}")
+        out.append("(nothing was sent)")
+        for line in out:
+            log.info("[rule %s] %s", rule.name, line)
+        return "<br>".join(line.replace("<", "&lt;").replace(">", "&gt;").replace("  ", "&nbsp;&nbsp;")
+                           for line in out)
 
     # ------------------------------------------------------------------ stacking
     def _client_state(self, slot: int) -> ClientState | None:

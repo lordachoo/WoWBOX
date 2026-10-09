@@ -13,3 +13,4 @@ config/*.bak
 .claude/
 *.egg-info/
 config/macros.yaml
+config/automation.yaml

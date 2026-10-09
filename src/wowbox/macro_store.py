@@ -38,6 +38,9 @@ def fmt_duration(seconds: float) -> str:
     ms = round(seconds * 1000)
     if ms < 1000 and abs(seconds * 1000 - ms) < 1e-6:
         return f"{ms}ms"
+    for unit, size in (("h", 3600), ("m", 60)):
+        if seconds >= size and abs(seconds / size - round(seconds / size)) < 1e-9:
+            return f"{round(seconds / size)}{unit}"
     return f"{seconds:g}s"
 
 
@@ -105,10 +108,14 @@ def load_macros_text(text: str) -> list[MacroConfig]:
 
 
 def remove_macros_section(team_text: str) -> tuple[str, bool]:
-    """team.yaml text without its top-level `macros:` block (comments elsewhere untouched), plus whether there
-    was one. The block runs from the `macros:` line to the next top-level key."""
+    return remove_section(team_text, "macros", "# macros: moved to macros.yaml (edited from the Macros tab)\n\n")
+
+
+def remove_section(team_text: str, key: str, pointer: str) -> tuple[str, bool]:
+    """team.yaml text with its top-level `key:` block replaced by `pointer` (comments elsewhere untouched), plus
+    whether there was one. The block runs from the `key:` line to the next top-level key."""
     lines = team_text.splitlines(keepends=True)
-    start = next((i for i, l in enumerate(lines) if l.startswith("macros:")), None)
+    start = next((i for i, l in enumerate(lines) if l.startswith(f"{key}:")), None)
     if start is None:
         return team_text, False
     end = start + 1
@@ -120,7 +127,6 @@ def remove_macros_section(team_text: str) -> tuple[str, bool]:
     # leave comments directly above the next key with that key
     while end - 1 > start and lines[end - 1].startswith("#"):
         end -= 1
-    pointer = "# macros: moved to macros.yaml (edited from the Macros tab)\n\n"
     return "".join(lines[:start]) + pointer + "".join(lines[end:]), True
 
 

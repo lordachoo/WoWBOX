@@ -53,6 +53,47 @@ def compile_condition(cond: Condition) -> list[tuple[str, Callable[[object, obje
     return preds
 
 
+OP_WORDS = {operator.eq: "=", operator.ne: "≠", operator.lt: "<", operator.le: "≤", operator.gt: ">",
+            operator.ge: "≥"}
+
+
+def condition_report(cond: Condition, states: dict[int, ClientState | None], preds: list | None = None
+                     ) -> tuple[bool, list[tuple[int, bool, str]]]:
+    """Whether `cond` matches now, and per character: (slot, matches, why not). `slot: all` needs every
+    listed character to match, anything else any one of them."""
+    preds = compile_condition(cond) if preds is None else preds
+    if isinstance(cond.slot, int):
+        slots = [cond.slot]
+    elif isinstance(cond.slot, list):
+        slots = list(cond.slot)
+    else:
+        slots = sorted(states)
+    per: list[tuple[int, bool, str]] = []
+    for slot in slots:
+        st = states.get(slot)
+        if st is None or st.stale:
+            per.append((slot, False, "no bridge data"))
+            continue
+        failed = next(((fld, fn, val) for fld, fn, val in preds if not fn(getattr(st, fld), val)), None)
+        if failed is None:
+            per.append((slot, True, ""))
+        else:
+            fld, fn, val = failed
+            per.append((slot, False, f"{fld} is {_show(getattr(st, fld))}, needs {OP_WORDS.get(fn, '?')} {_show(val)}"))
+    if not per:
+        return False, per
+    hits = [ok for _, ok, _ in per]
+    return (all(hits) if cond.slot == "all" else any(hits)), per
+
+
+def _show(v: object) -> str:
+    if isinstance(v, bool):
+        return "yes" if v else "no"
+    if isinstance(v, float):
+        return f"{v:g}"
+    return str(v)
+
+
 @dataclass
 class RuleRuntime:
     rule: AutomationRule
@@ -84,12 +125,20 @@ class AutomationEngine:
         self.on_macro: Callable[[str], None] = lambda name: log.warning("no macro runner for %r", name)
         self._chat_seen: dict[tuple, float] = {}
         self.rules: list[RuleRuntime] = []
+        self.paused_rules: set[str] = set()  # e.g. while a rule is open in the editor
         self.load(rules)
 
     def load(self, rules: list[AutomationRule]) -> None:
+        """(Re)load rules. A rule that keeps its name keeps its fire count and cooldown."""
+        old = {rt.rule.name: rt for rt in self.rules} if hasattr(self, "rules") else {}
         runtimes = []
         for r in rules:
-            runtimes.append(RuleRuntime(r, flatten(r.do), compile_condition(r.when) if r.when else []))
+            rt = RuleRuntime(r, flatten(r.do), compile_condition(r.when) if r.when else [])
+            if prev := old.get(r.name):
+                rt.last_fired, rt.fire_count = prev.last_fired, prev.fire_count
+                if prev.rule.every == r.every:
+                    rt.next_due = prev.next_due
+            runtimes.append(rt)
         self.rules = runtimes
 
     def set_enabled(self, value: bool) -> None:
@@ -130,7 +179,7 @@ class AutomationEngine:
             if rt.running_step is not None:
                 self._advance(rt, now)
                 continue
-            if not rt.enabled or rt.rule.chat is not None:
+            if not rt.enabled or rt.rule.chat is not None or rt.rule.name in self.paused_rules:
                 continue
             if rt.last_fired is not None and now - rt.last_fired < rt.rule.cooldown:
                 continue
@@ -146,24 +195,8 @@ class AutomationEngine:
             self._fire(rt, now)
 
     def _matches(self, rt: RuleRuntime, states: dict[int, ClientState | None]) -> bool:
-        cond = rt.rule.when
-        assert cond is not None
-        if isinstance(cond.slot, int):
-            slots = [cond.slot]
-        elif isinstance(cond.slot, list):
-            slots = cond.slot
-        else:
-            slots = list(states)
-        results = []
-        for s in slots:
-            st = states.get(s)
-            if st is None or st.stale:
-                results.append(False)
-                continue
-            results.append(all(fn(getattr(st, fld), val) for fld, fn, val in rt.preds))
-        if not results:
-            return False
-        return all(results) if cond.slot == "all" else any(results)
+        assert rt.rule.when is not None
+        return condition_report(rt.rule.when, states, rt.preds)[0]
 
     # ------------------------------------------------------------------ chat
     def on_chat(self, slot: int, ev: ChatEvent, now: float, listener: str = "") -> None:
@@ -171,6 +204,7 @@ class AutomationEngine:
         if not self.enabled:
             return
         candidates = [rt for rt in self.rules if rt.enabled and rt.rule.chat is not None
+                      and rt.rule.name not in self.paused_rules
                       and self._chat_matches(rt.rule.chat, slot, ev)]
         if not candidates:
             return

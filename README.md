@@ -182,7 +182,7 @@ On start, WoWBox attaches to every running `Wow.exe` window. It puts each window
 | **Clients** | One row per slot: character and class, label, role, PID, window, status, Broadcast checkbox (untick to leave a client out of broadcasts), HP, power, target, state flags (`combat casting TYPING following …`), and bridge health. Buttons: **Move up/down** swaps slots, **Remember characters** pins the current characters into `team.yaml`. |
 | **Routes** | The route table. A change takes effect as soon as you finish editing a cell. A bad row turns red and isn't used. **Save config** keeps the changes after a restart. |
 | **Macros** | Your macros with their hotkeys, whether they're running, and their steps. **New / Edit / Duplicate / Delete** open the macro editor (double-click edits too). Run/Stop, Stop all. |
-| **Automation** | Rules, their triggers and actions, enable checkboxes, and how often each has fired. |
+| **Automation** | Rules, their triggers and actions, and how often each has fired. **New / Edit / Duplicate / Delete** open the rule editor (double-click edits too). The *On* box enables or disables a rule, and the change is saved at once. |
 | **Log** | Everything WoWBox does: keys typed, rules fired, chat lines seen, `/bb` commands. The same goes to `logs\wowbox.log`. |
 
 A tray icon offers the same switches. Its dot is green while broadcasting and red while not, with a yellow ring while automation is on. Closing the window quits WoWBox.
@@ -616,6 +616,26 @@ Useful chat commands:
 
 Rules that act without a keypress. Automation always starts **OFF** and in **dry run**: dry run logs what it would send and sends nothing. Turn it on with the button, untick Dry run when you trust it, and kill it with Ctrl+Alt+K.
 
+### The rule editor
+
+In the **Automation** tab, use **New**, **Edit** (or double-click a rule), **Duplicate** or **Delete**.
+
+- **Name, Enabled, Cooldown.** The cooldown is the least time between two firings, e.g. `20s`.
+- **Trigger.** Pick one:
+  - **State:** fires when a condition is true.
+    - **Who:** `any` fires if one of them matches, `all` only if every one does. Or pick a character or slots, e.g. `3 (Kunth)` or `[2, 3]`.
+    - **Conditions:** rows of *Field* (health %, power %, in combat, casting, mounted, on /follow, has a target…), *Is* (`=`, `≠`, `<`, `≤`, `>`, `≥`) and *Value*. Yes/no fields only offer `=`/`≠` and *yes*/*no*. All rows must hold.
+  - **Timer:** every `25m`, `90s`, `1h`…
+  - **Chat:** a chat line comes in. Pick the channels, *From* (names, or empty for anyone), *Containing* (words, or empty for any line) and *Heard by*.
+  - **Chat + state:** a chat line, but only if a condition is true too, e.g. "only if Kunth isn't casting".
+- **Then do:** the same step table as the macro editor (*Type chat line*, *Press key*, *Press keys*, *Wait*, *Start macro*, with *To* and *Then wait*). In chat rules, `{sender}`, `{message}`, `{channel}` and `{listener}` are filled in.
+- **Live check:** updates twice a second while you edit. It shows in plain words whether the rule would fire *right now*, using the characters' live state, and if not, why not. For example: `Condition is false now: Kunth: no (power_pct is 62, needs < 40)`. For chat rules it spells out what it listens for and on whose client. It also says whether automation is off, in dry run, or live.
+- **Test (dry run):** shows, and logs, exactly what one firing would send and to whom, e.g. `type '/use Conjured Water' -> Kunth`. Nothing is sent. Chat rules are tested with a sample line from the first listed sender.
+- **Save** checks everything first. Problems show in red, e.g. `Condition 2 (power_pct): 'lots' isn't a number` or `Step 1: unknown key name`. A saved rule is in use immediately.
+- **Safe editing:** a rule never fires while its editor is open. Saving keeps its fire count and cooldown.
+
+Rules are saved in **`config/automation.yaml`**, the same way macros go to `macros.yaml`. The first time you save, your rules move over from `team.yaml`. WoWBox removes only the `automation:` block, leaves a comment in its place, and keeps a `team.yaml.bak`. `automation_options:` and everything else stay in `team.yaml` as you wrote them. Comments that were *inside* the old `automation:` block don't carry over. Once `automation.yaml` exists, it's the only place rules are read from. You can still edit it by hand and press **Reload config**. The format is the same as below.
+
 ### State rules: `when:`
 
 ```yaml
@@ -799,7 +819,7 @@ Everything lives in `config\team.yaml`. The exe uses `config\team.yaml` next to 
 | `routes` | list of `{keys, to, note}` (section 9) |
 | `bridge` | `enabled`, `hz` (10), `block_size` (8, match `/bb size`), `method` (auto / mss / dxcam / printwindow), `stale_after` (1.5s), `commands` (true) |
 | `macros` | section 12. Kept in `config/macros.yaml` once you've saved from the macro editor. |
-| `automation` | section 13 |
+| `automation` | section 13. Kept in `config/automation.yaml` once you've saved from the rule editor. |
 | `automation_options` | `enabled_on_start` (false), `dry_run` (true), `tick_hz` (10), `pause_on_stale_bridge` (true) |
 | `memread` | optional read-only memory reader: `enabled` (false), `hz`, `fields: {name: {address, module, offsets, type}}`. No addresses ship with WoWBox; you supply and verify them. |
 | `ui` | `overlay: true` shows the overlay on start |
@@ -822,7 +842,7 @@ Close the exe before rebuilding: Windows locks a running exe.
 
 ```
 addon/BoxBridge/        the WoW addon (Lua): state strip, chat lines, /bb commands
-config/                 team.example.yaml (tracked), team.yaml + macros.yaml (yours, not tracked)
+config/                 team.example.yaml (tracked); team.yaml, macros.yaml, automation.yaml (yours, not tracked)
 packaging/              build.ps1 + PyInstaller entry point
 spikes/                 Phase 0 experiments (see spikes/README.md and RESULTS.md)
 src/wowbox/
@@ -838,11 +858,13 @@ src/wowbox/
   bridge/               pixel decoder (state + chat + commands) and capture poller
   automation/           steps, macro runner, rule engine
   macro_store.py        macros.yaml: load, save, the one-time move out of team.yaml
+  rule_store.py         automation.yaml: the same for automation rules
+  config_text.py        Save config: edits team.yaml in place, keeping comments
   commands.py           /bb team commands (the client you typed in goes last)
   layout/               grid maths, thumbnail strip, tab bar, layout manager
   platform/             Win32 windows / input / capture (ctypes), and fakes for tests
   memread/              optional read-only memory reader
-  ui/                   main window, macro editor, tray icon, overlay
+  ui/                   main window, macro and rule editors, tray icon, overlay
 tests/                  pytest suite
 wowbox-project-plan.md  the original design plan
 ```

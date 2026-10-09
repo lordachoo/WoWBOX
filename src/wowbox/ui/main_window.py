@@ -451,14 +451,25 @@ class MainWindow(QMainWindow):
         self.auto_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         self.auto_table.horizontalHeader().setStretchLastSection(True)
         self.auto_table.itemChanged.connect(self._auto_item_changed)
+        self.auto_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.auto_table.cellDoubleClicked.connect(lambda row, col: col and self._rule_edit(row))
         self.auto_status = QLabel()
-        hint = QLabel("Rules live in team.yaml (automation:). Edit there, then Reload config. Dry run logs what "
-                      f"would be sent without sending. Kill switch hotkey: {self.c.cfg.hotkeys.automation_kill}.")
+        buttons = QHBoxLayout()
+        row = self.auto_table.currentRow
+        for text, fn in (("New", lambda: self._rule_edit(None)), ("Edit", lambda: self._rule_edit(row())),
+                         ("Duplicate", lambda: self._rule_edit(row(), copy=True)),
+                         ("Delete", lambda: self._rule_delete(row()))):
+            buttons.addWidget(QPushButton(text, clicked=fn))
+        buttons.addStretch(1)
+        hint = QLabel("Double-click a rule to edit it; the On box enables or disables it. Rules are saved in "
+                      "config/automation.yaml. Automation as a whole is switched on in the toolbar and starts in "
+                      "dry run (logs only). Kill switch hotkey: " + str(self.c.cfg.hotkeys.automation_kill) + ".")
         hint.setWordWrap(True)
         w = QWidget()
         lay = QVBoxLayout(w)
         lay.addWidget(self.auto_status)
         lay.addWidget(self.auto_table)
+        lay.addLayout(buttons)
         lay.addWidget(hint)
         return w
 
@@ -496,7 +507,50 @@ class MainWindow(QMainWindow):
 
     def _auto_item_changed(self, item: QTableWidgetItem) -> None:
         if item.column() == 0 and item.row() < len(self.c.engine.rules):
-            self.c.engine.rules[item.row()].rule.enabled = item.checkState() == Qt.Checked
+            rule = self.c.engine.rules[item.row()].rule
+            on = item.checkState() == Qt.Checked
+            if on != rule.enabled:
+                self.c.set_rule_enabled(rule.name, on)
+
+    def _rule_edit(self, row: int | None, copy: bool = False) -> None:
+        from .automation_editor import RuleEditor
+        rules = [rt.rule for rt in self.c.engine.rules]
+        names = [r.name for r in rules]
+        rule = None
+        if row is not None:
+            if not 0 <= row < len(rules):
+                return
+            rule = rules[row]
+        source = rule.name if rule else None
+        if rule and copy:
+            new_name = f"{rule.name}-copy"
+            while new_name in names:
+                new_name += "-copy"
+            rule = rule.model_copy(update={"name": new_name})
+        old_name = None if copy else source
+        dlg = RuleEditor(self, rule, targets=self.c.target_choices(), who_choices=self.c.who_choices(),
+                         rule_names=[n for n in names if n != old_name], preview=self.c.rule_preview,
+                         on_test=self.c.test_rule)
+        if copy:
+            dlg.setWindowTitle(f"New rule (copy of {source})")
+        if old_name:
+            self.c.engine.paused_rules.add(old_name)  # a half-edited rule must not fire
+        try:
+            accepted = dlg.exec()
+        finally:
+            self.c.engine.paused_rules.discard(old_name)
+        if accepted and dlg.result_rule:
+            try:
+                self.c.save_rule(old_name, dlg.result_rule)
+            except Exception as e:
+                QMessageBox.warning(self, "Rule not saved", str(e))
+
+    def _rule_delete(self, row: int) -> None:
+        rules = [rt.rule for rt in self.c.engine.rules]
+        if not 0 <= row < len(rules):
+            return
+        if QMessageBox.question(self, "Delete rule", f"Delete the rule {rules[row].name!r}?") == QMessageBox.Yes:
+            self.c.delete_rule(rules[row].name)
 
     def refresh_automation(self) -> None:
         e = self.c.engine
