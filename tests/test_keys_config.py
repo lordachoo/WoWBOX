@@ -8,6 +8,14 @@ from wowbox.keys import Chord, Mod, expand_key_spec, parse_chord, vk_from_name
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def example_copy(tmp_path):
+    """The example config on its own: a copy, so a macros.yaml next to config/ (yours) isn't picked up."""
+    import shutil
+    p = tmp_path / "team.yaml"
+    shutil.copy(ROOT / "config" / "team.example.yaml", p)
+    return p
+
+
 def test_parse_chord():
     assert parse_chord("1") == Chord(0x31)
     assert parse_chord("Ctrl+Alt+Pause") == Chord(0x13, Mod.CTRL | Mod.ALT)
@@ -39,7 +47,7 @@ def test_durations():
 
 
 def test_example_config_loads_and_roundtrips(tmp_path):
-    cfg = load_config(ROOT / "config" / "team.example.yaml")
+    cfg = load_config(example_copy(tmp_path))
     assert cfg.team.leader == 1 and len(cfg.team.slots) == 4
     assert cfg.routes[3].to == [3]
     assert cfg.automation[1].every == 1500

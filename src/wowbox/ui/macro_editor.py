@@ -28,7 +28,9 @@ KIND_LABELS = {k: label for k, label, _ in KINDS}
 KIND_HINTS = {k: hint for k, _, hint in KINDS}
 NO_TARGET = {"wait", "macro"}
 _SLOTS = re.compile(r"^\[?\s*\d+(\s*,\s*\d+)*\s*\]?$")
-COLS = ["Step", "Value", "To", "Delay"]
+COLS = ["Step", "Value", "To", "Key gap", "Then wait"]
+GAP_COL, THEN_COL = 3, 4
+THEN_HINT = "e.g. 1.6s"
 
 
 def parse_target(text: str):
@@ -46,9 +48,9 @@ def target_text(target) -> str:
 def step_row(step: ActionConfig) -> dict:
     """An ActionConfig as the editor's row values."""
     if step.wait is not None:
-        return {"kind": "wait", "value": fmt_duration(step.wait), "to": "", "delay": ""}
+        return {"kind": "wait", "value": fmt_duration(step.wait), "to": "", "delay": "", "then": ""}
     if step.macro is not None:
-        return {"kind": "macro", "value": step.macro, "to": "", "delay": ""}
+        return {"kind": "macro", "value": step.macro, "to": "", "delay": "", "then": ""}
     if step.send is not None:
         kind, value = "send", step.send
     elif step.type is not None:
@@ -56,7 +58,22 @@ def step_row(step: ActionConfig) -> dict:
     else:
         kind, value = "keys", ", ".join(step.keys or [])
     delay = fmt_duration(step.delay) if kind == "keys" else ""
-    return {"kind": kind, "value": value, "to": target_text(step.to), "delay": delay}
+    return {"kind": kind, "value": value, "to": target_text(step.to), "delay": delay, "then": ""}
+
+
+def macro_rows(macro: MacroConfig) -> list[dict]:
+    """A macro's steps as editor rows. A wait right after a step shows as that row's "Then wait"."""
+    rows: list[dict] = []
+    for step in flat_steps(macro.do):
+        if step.wait is not None and rows and rows[-1]["kind"] != "wait" and not rows[-1]["then"]:
+            rows[-1]["then"] = fmt_duration(step.wait)
+        else:
+            rows.append(step_row(step))
+    return rows
+
+
+def new_row(to: str = "all") -> dict:
+    return {"kind": "type", "value": "", "to": to, "delay": "", "then": ""}
 
 
 def row_action(row: dict) -> dict:
@@ -85,23 +102,29 @@ def build_macro(name: str, key: str, note: str, rows: list[dict]) -> MacroConfig
         if not row["value"].strip():
             raise ValueError(f"Step {i}: {KIND_LABELS[row['kind']].lower()} needs a value "
                              f"(e.g. {KIND_HINTS[row['kind']].split('   ')[0]}).")
-    steps = [row_action(r) for r in rows]
+    steps, step_rows = [], []  # step_rows[i]: the editor row that step i came from (for error messages)
+    for i, r in enumerate(rows, 1):
+        steps.append(row_action(r))
+        step_rows.append(i)
+        if r.get("then", "").strip() and r["kind"] != "wait":
+            steps.append({"wait": r["then"].strip()})
+            step_rows.append(i)
     data = {"name": name.strip(), "key": key or None, "note": note.strip(),
             "do": steps[0] if len(steps) == 1 else {"sequence": steps}}
     try:
         return MacroConfig.model_validate(data)
     except ValidationError as e:
-        raise ValueError(_explain(e, len(steps) == 1)) from None
+        raise ValueError(_explain(e, step_rows)) from None
 
 
-def _explain(e: ValidationError, single: bool) -> str:
+def _explain(e: ValidationError, step_rows: list[int]) -> str:
     msgs = []
     for err in e.errors():
         loc = list(err["loc"])
         where = ""
         if loc[:2] == ["do", "sequence"] and len(loc) > 2 and isinstance(loc[2], int):
-            where = f"Step {loc[2] + 1}: "
-        elif loc[:1] == ["do"] and single:
+            where = f"Step {step_rows[loc[2]]}: "
+        elif loc[:1] == ["do"] and len(step_rows) == 1:
             where = "Step 1: "
         elif loc:
             where = f"{loc[0]}: "
@@ -180,10 +203,15 @@ class MacroEditor(QDialog):
         hh.setSectionResizeMode(1, QHeaderView.Stretch)
         hh.setSectionResizeMode(2, QHeaderView.Interactive)
         hh.setSectionResizeMode(3, QHeaderView.Interactive)
+        hh.setSectionResizeMode(4, QHeaderView.Interactive)
         self.table.setColumnWidth(2, 170)
-        self.table.setColumnWidth(3, 70)
-        self.rows: list[dict] = [step_row(s) for s in flat_steps(macro.do)] if macro else \
-            [{"kind": "type", "value": "", "to": "all", "delay": ""}]
+        self.table.setColumnWidth(GAP_COL, 70)
+        self.table.setColumnWidth(THEN_COL, 80)
+        self.table.horizontalHeaderItem(GAP_COL).setToolTip(
+            "Press keys only: the gap between the keys (default 250ms)")
+        self.table.horizontalHeaderItem(THEN_COL).setToolTip(
+            "A pause after this step, e.g. 1.6s between two casts (global cooldown)")
+        self.rows: list[dict] = macro_rows(macro) if macro else [new_row()]
 
         step_buttons = QHBoxLayout()
         for text, fn in (("Add step", self.add_row), ("Remove", self.remove_row), ("Move up", lambda: self.move(-1)),
@@ -235,12 +263,16 @@ class MacroEditor(QDialog):
             to.setEditable(True)
             to.addItems(self.targets)
             to.setCurrentText(row["to"])
-            delay = QLineEdit(row["delay"])
-            delay.setPlaceholderText(fmt_duration(DEFAULT_DELAY))
-            for col, w in enumerate((kind, value, to, delay)):
+            is_keys = row["kind"] == "keys"
+            delay = QLineEdit(row["delay"] if is_keys else "")
+            delay.setPlaceholderText(fmt_duration(DEFAULT_DELAY) if is_keys else "")
+            then = QLineEdit(row.get("then", ""))
+            then.setPlaceholderText(THEN_HINT if row["kind"] != "wait" else "")
+            for col, w in enumerate((kind, value, to, delay, then)):
                 t.setCellWidget(r, col, w)
             to.setEnabled(row["kind"] not in NO_TARGET)
-            delay.setEnabled(row["kind"] == "keys")
+            delay.setEnabled(is_keys)
+            then.setEnabled(row["kind"] != "wait")
 
     def read(self) -> list[dict]:
         """The rows as currently shown (widgets -> self.rows)."""
@@ -248,7 +280,8 @@ class MacroEditor(QDialog):
         rows = []
         for r in range(t.rowCount()):
             rows.append({"kind": t.cellWidget(r, 0).currentData(), "value": t.cellWidget(r, 1).text(),
-                         "to": t.cellWidget(r, 2).currentText(), "delay": t.cellWidget(r, 3).text()})
+                         "to": t.cellWidget(r, 2).currentText(), "delay": t.cellWidget(r, GAP_COL).text(),
+                         "then": t.cellWidget(r, THEN_COL).text()})
         self.rows = rows
         return rows
 
@@ -264,7 +297,8 @@ class MacroEditor(QDialog):
         r = self.table.currentRow()
         r = len(self.rows) if r < 0 else r + 1
         prev_to = next((row["to"] for row in reversed(self.rows[:r]) if row["to"]), "all")
-        self.rows.insert(r, {"kind": "type", "value": "", "to": prev_to, "delay": ""})
+        prev_then = next((row["then"] for row in reversed(self.rows[:r]) if row.get("then")), "")
+        self.rows.insert(r, {**new_row(prev_to), "then": prev_then})
         self.render()
         self.table.setCurrentCell(r, 1)
         self.table.cellWidget(r, 1).setFocus()

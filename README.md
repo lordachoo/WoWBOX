@@ -457,11 +457,12 @@ In the **Macros** tab, use **New**, **Edit** (or double-click a macro), **Duplic
 
 - **Name** and **Note:** free text. Names must be unique.
 - **Hotkey:** click the field, then press the combination (e.g. Ctrl+Alt+H). Backspace or Clear removes it. If the combination already belongs to another macro or a WoWBox hotkey, the editor says so and won't save. While the editor is open, WoWBox hotkeys are paused, so recording F12 doesn't also stack your team.
-- **Steps:** one row per step, run top to bottom. **Add step** inserts below the selected row and copies its *To*. **Remove**, **Move up** and **Move down** do what they say. The columns are:
+- **Steps:** one row per step, run top to bottom. **Add step** inserts below the selected row and copies its *To* and *Then wait*. **Remove**, **Move up** and **Move down** do what they say. The columns are:
   - **Step:** what kind of step it is. *Type chat line*, *Press key*, *Press keys* (comma-separated, *Delay* apart), *Wait*, or *Start macro*.
   - **Value:** the chat line, key, key list, duration (`300ms`, `1.5s`) or macro name.
   - **To:** pick from your characters, `all`, `followers`, `leader`, `not:leader`, `class:…`, `role:…`, or type anything from section 8. For slots, type something like `[2, 3]`.
-  - **Delay:** only for *Press keys*.
+  - **Key gap:** *Press keys* rows only. The pause between those keys (default 250ms).
+  - **Then wait:** a pause *after* this step, on any row. Put `1.6s` after each cast so the next one isn't blocked by the global cooldown. A *Wait* row does the same, so use whichever reads better. When you reopen a macro, a wait that follows a step is shown in that step's *Then wait*.
 - **Test (run now):** runs the macro as it stands in the editor, without saving.
 - **Save:** checks everything first. Problems, such as a bad key name or an empty step, show in red with the step number. A saved macro works immediately, with no Reload needed.
 
@@ -539,6 +540,25 @@ The same macro in `config/macros.yaml`:
 - **Typed instead of a key press.** `/petattack` is a slash command, so it costs no bar space. It also avoids posting Ctrl+1 to background windows, the one key type not yet confirmed to work there.
 - **Ctrl+1 never reaches the game.** WoWBox takes the hotkey, so the game doesn't see it. If you had a route for `Ctrl+1`, remove it: the macro hotkey wins anyway, but two definitions get confusing. WoWBox waits until you let go of Ctrl, then the four lines take about a second.
 - **More pet commands** work the same way: `/petfollow`, `/petstay`, `/petpassive`, `/petdefensive`, `/petaggressive`, and pet spells with `/cast`, e.g. `/cast Torment`.
+
+### Example: buff the whole group (Ctrl+2)
+
+The paladin casts Blessing of Kings on everyone in the group, itself included, with the global cooldown between casts. `[@player]` is the caster itself, and `[@party1]`–`[@party4]` are the others in its group. `exists` skips empty party spots, so the same macro works in any group, whoever is in it and in whatever order.
+
+| Step | Value | To | Then wait |
+|---|---|---|---|
+| Type chat line | `/cast [@player] Blessing of Kings` | `class:PALADIN` | `1.6s` |
+| Type chat line | `/cast [@party1,exists] Blessing of Kings` | `class:PALADIN` | `1.6s` |
+| Type chat line | `/cast [@party2,exists] Blessing of Kings` | `class:PALADIN` | `1.6s` |
+| Type chat line | `/cast [@party3,exists] Blessing of Kings` | `class:PALADIN` | `1.6s` |
+| Type chat line | `/cast [@party4,exists] Blessing of Kings` | `class:PALADIN` | |
+
+- **Several buffers at once.** Different characters can cast at the same time. For a druid and a shaman in one macro (e.g. Ctrl+3), put the druid's `Mark of the Wild` row and the shaman's self buff (`/cast Water Shield`) next to each other. Give only the second of each pair a *Then wait*, so both cast, then both wait.
+- **Fewer casts:** `/cast Gift of the Wild` (druid) and the *Greater Blessings* (paladin) buff the group, or the class, in one cast, but need reagents.
+- **Not in combat:** add `nocombat` to the brackets, e.g. `[@party1,exists,nocombat]`.
+- **Range** is about 30 yards, so stack first (F12).
+- **Spell names** must match the game's exactly, including your server's custom spells.
+- **If casts fail** with "Spell is not ready yet", raise *Then wait* a little.
 
 ### Using items and casting spells
 

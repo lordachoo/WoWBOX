@@ -193,3 +193,46 @@ def test_controller_hotkey_owner_words():
     from wowbox.keys import parse_chord
     assert rig.router.hotkey_owner(parse_chord("F8")) == "macro:gnope-assist-and-nuke"
     assert rig.router.hotkey_owner(parse_chord("F12")) == "stack"
+
+
+def test_then_wait_column_for_a_buff_macro(qapp):
+    dlg, _ = editor(qapp)
+    t = dlg.table
+    dlg.name_edit.setText("buff-paladin")
+    t.cellWidget(0, 1).setText("/cast [@player] Blessing of Kings")
+    t.cellWidget(0, 2).setCurrentText("class:PALADIN")
+    t.cellWidget(0, 4).setText("1.6s")
+    t.setCurrentCell(0, 1)
+    dlg.add_row()  # copies To and Then wait from the row above
+    assert t.cellWidget(1, 2).currentText() == "class:PALADIN" and t.cellWidget(1, 4).text() == "1.6s"
+    t.cellWidget(1, 1).setText("/cast [@party1,exists] Blessing of Kings")
+    t.cellWidget(1, 4).setText("")
+    m = dlg.build()
+    steps = flat_steps(m.do)
+    assert [s.type or s.wait for s in steps] == ["/cast [@player] Blessing of Kings", 1.6,
+                                                 "/cast [@party1,exists] Blessing of Kings"]
+    # reopened: the wait shows in the row again, not as its own row
+    dlg2, _ = editor(qapp, m)
+    assert [r["kind"] for r in dlg2.read()] == ["type", "type"] and dlg2.read()[0]["then"] == "1.6s"
+    assert same(dlg2.build(), m)
+
+
+def test_key_gap_only_on_press_keys_rows(qapp):
+    dlg, _ = editor(qapp, macros()[0])  # type, wait 300ms, keys 1-9,0 with 1.5s gaps
+    rows = dlg.read()
+    assert [r["kind"] for r in rows] == ["type", "keys"]
+    assert rows[0]["then"] == "300ms" and rows[1]["delay"] == "1.5s"
+    gap_type, gap_keys = dlg.table.cellWidget(0, 3), dlg.table.cellWidget(1, 3)
+    assert not gap_type.isEnabled() and gap_type.text() == "" and gap_type.placeholderText() == ""
+    assert gap_keys.isEnabled()
+
+
+def test_error_points_at_the_right_row_with_waits(qapp):
+    dlg, _ = editor(qapp, macros()[0])
+    dlg.table.cellWidget(1, 1).setText("1-9, Banana")
+    with pytest.raises(ValueError, match="Step 2"):
+        dlg.build()
+    dlg.table.cellWidget(1, 1).setText("1-9, 0")
+    dlg.table.cellWidget(0, 4).setText("soon")
+    with pytest.raises(ValueError, match="Step 1"):
+        dlg.build()

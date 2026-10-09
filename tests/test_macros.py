@@ -21,8 +21,16 @@ def identify(r: Rig) -> None:
         r.team.clients[slot].character, r.team.clients[slot].class_token = name, cls
 
 
-def test_example_macros_parse_and_flatten():
-    cfg = load_config(ROOT / "config" / "team.example.yaml")
+def example_copy(tmp_path):
+    """The example config on its own: a copy, so a macros.yaml next to config/ (yours) isn't picked up."""
+    import shutil
+    p = tmp_path / "team.yaml"
+    shutil.copy(ROOT / "config" / "team.example.yaml", p)
+    return p
+
+
+def test_example_macros_parse_and_flatten(tmp_path):
+    cfg = load_config(example_copy(tmp_path))
     steps = flatten(cfg.macros[0].do)
     assert isinstance(steps[0], TypeStep) and steps[0].text == "/assist Tankadin"
     sends = [s for s in steps if isinstance(s, SendStep)]
