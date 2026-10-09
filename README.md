@@ -285,7 +285,7 @@ Type a `/bb` command in any client's chat, and WoWBox types that command into th
 
 - **Any slash command** works: `/reload`, `/follow`, `/assist`, `/target`, `/cast`, `/use`, `/sit`, `/dance`, `/say`, `/console …`, and slash commands from other addons. The `/` is optional.
 - **Who:** `all` and `others` reach every attached client, even ones with Broadcast unticked. `to <who>` takes any target from section 8 except lists. Targets are seen from the client you typed in, so `/bb to followers …` means everyone but you.
-- **How it gets there:** BoxBridge shows the command on its strip for half a second, WoWBox reads it, and types `Enter, command, Enter` into each target client. That takes about a quarter to half a second.
+- **How it gets there:** BoxBridge shows the command on its strip for half a second, WoWBox reads it, and types `Enter, command, Enter` into each target client. That takes about a quarter to half a second. The client you typed the command in gets it last, about 0.35 s after its chat box has closed, so your own Enter key can't get mixed into it.
 - **Length limit:** a command can be up to 27 bytes, slash included. That covers `/assist Tinkerdawn` and `/cast Shadow Bolt`. For longer things, use a WoWBox macro (section 12) or an in-game macro.
 - **Protected spells** (`/cast`, `/target`) work, because they are really typed into the chat box, just as if you typed them.
 - **Turning it off:** set `bridge.commands: false` to ignore all `/bb` team commands.

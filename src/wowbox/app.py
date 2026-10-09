@@ -11,6 +11,7 @@ from PySide6.QtCore import QObject, QTimer, Signal
 
 from .automation import AutomationEngine
 from .automation.macros import MacroRunner
+from .commands import TeamCommands
 from .follow import FollowManager
 from .stack import Stacker, StackManager, StackResult
 from .bridge import BridgePoller, ChatEvent, ClientState
@@ -88,6 +89,7 @@ class Controller(QObject):
         self.engine.on_macro = self.macros.start
         self.memread = MemReadPoller(cfg.memread, self._pids, self._on_mem_values)
         self.stacker = Stacker(cfg.stack, self._client_state, self._post_raw)
+        self.commands = TeamCommands(self.router, self._client_state)
         self.stack = StackManager(cfg.stack, self.stacker, lambda anchor: self.team.resolve(self.cfg.stack.who, anchor),
                                   on_done=self.sig_stack_done.emit, boost=self.bridge.boost,
                                   moving_since=lambda: self.router.last_movement)
@@ -335,7 +337,8 @@ class Controller(QObject):
             log.warning("/bb from %s: no client matches %r (%s)", sender, who, text)
             return []
         log.info("/bb from %s -> %s %s: %s", sender, who, slots, text)
-        return self.router.type_text(text, slots)
+        self.commands.send(text, slots, origin)
+        return slots
 
     # ------------------------------------------------------------------ identity / slots
     def _wanted_characters(self) -> dict[int, str]:
