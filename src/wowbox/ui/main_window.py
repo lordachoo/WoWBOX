@@ -3,20 +3,24 @@ from __future__ import annotations
 
 import logging
 import math
+import time
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QHBoxLayout, QHeaderView, QLabel, QMainWindow,
-    QMessageBox, QPlainTextEdit, QPushButton, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
+    QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout,
+    QWidget,
 )
 
 from ..config import RouteConfig
 from ..keys import expand_key_spec
 from ..layout import LAYOUT_ORDER
+from ..macro_store import fmt_duration
 
 log = logging.getLogger(__name__)
 
+AUTO_COLS = ["On", "Name", "Trigger", "Actions", "Status", "Next", "Last fired", "Fired"]
 CLIENT_COLS = ["Slot", "Character", "Label", "Role", "PID", "Window", "Status", "Broadcast", "HP", "Power", "Target",
                "State", "Position", "Bridge"]
 
@@ -445,11 +449,16 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ automation
     def _build_automation_tab(self) -> QWidget:
-        self.auto_table = QTableWidget(0, 5)
-        self.auto_table.setHorizontalHeaderLabels(["On", "Name", "Trigger", "Actions", "Fired"])
+        self.auto_table = QTableWidget(0, len(AUTO_COLS))
+        self.auto_table.setHorizontalHeaderLabels(AUTO_COLS)
         self.auto_table.verticalHeader().setVisible(False)
-        self.auto_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
-        self.auto_table.horizontalHeader().setStretchLastSection(True)
+        hh = self.auto_table.horizontalHeader()
+        hh.setSectionResizeMode(QHeaderView.ResizeToContents)
+        for col, width in (("Trigger", 300), ("Actions", 260), ("Next", 230)):  # long text: fixed, cut with ...
+            hh.setSectionResizeMode(AUTO_COLS.index(col), QHeaderView.Interactive)
+            self.auto_table.setColumnWidth(AUTO_COLS.index(col), width)
+        hh.setSectionResizeMode(AUTO_COLS.index("Actions"), QHeaderView.Stretch)
+        self.auto_table.setTextElideMode(Qt.ElideRight)
         self.auto_table.itemChanged.connect(self._auto_item_changed)
         self.auto_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.auto_table.cellDoubleClicked.connect(lambda row, col: col and self._rule_edit(row))
@@ -477,6 +486,7 @@ class MainWindow(QMainWindow):
         from ..automation.actions import describe
         t = self.auto_table
         t.blockSignals(True)
+        t.setRowCount(0)  # drops the old rows' countdown bars too
         t.setRowCount(len(self.c.engine.rules))
         for r, rt in enumerate(self.c.engine.rules):
             on = _item("")
@@ -495,15 +505,24 @@ class MainWindow(QMainWindow):
                 if rt.rule.when is not None:
                     trig += " when " + ", ".join(f"{k}={v}" for k, v in rt.rule.when.model_dump().items())
             elif rt.rule.every is not None:
-                trig = f"every {rt.rule.every:g}s"
+                trig = f"every {fmt_duration(rt.rule.every)}"
             else:
                 trig = "when " + ", ".join(f"{k}={v}" for k, v in rt.rule.when.model_dump().items())
             if rt.rule.cooldown:
-                trig += f" (cooldown {rt.rule.cooldown:g}s)"
-            t.setItem(r, 2, _item(trig))
-            t.setItem(r, 3, _item(describe(rt.steps)))
-            t.setItem(r, 4, _item("0"))
+                trig += f" (cooldown {fmt_duration(rt.rule.cooldown)})"
+            for col, text in (("Trigger", trig), ("Actions", describe(rt.steps))):
+                it = _item(text)
+                it.setToolTip(text)  # the column cuts long text; hover shows all of it
+                t.setItem(r, AUTO_COLS.index(col), it)
+            for col in ("Status", "Next", "Last fired", "Fired"):
+                t.setItem(r, AUTO_COLS.index(col), _item(""))
+            if rt.rule.every is not None:  # timers get a countdown bar
+                bar = QProgressBar()
+                bar.setRange(0, 1000)
+                bar.setTextVisible(True)
+                t.setCellWidget(r, AUTO_COLS.index("Next"), bar)
         t.blockSignals(False)
+        self.refresh_automation()
 
     def _auto_item_changed(self, item: QTableWidgetItem) -> None:
         if item.column() == 0 and item.row() < len(self.c.engine.rules):
@@ -554,10 +573,26 @@ class MainWindow(QMainWindow):
 
     def refresh_automation(self) -> None:
         e = self.c.engine
+        t = self.auto_table
+        now = time.monotonic()
         for r, rt in enumerate(e.rules):
-            it = self.auto_table.item(r, 4)
-            if it and it.text() != str(rt.fire_count):
-                it.setText(str(rt.fire_count))
+            st = e.status(rt, now)
+            for col, text in (("Status", st.state), ("Last fired", st.last), ("Fired", str(rt.fire_count))):
+                it = t.item(r, AUTO_COLS.index(col))
+                if it and it.text() != text:
+                    it.setText(text)
+            nxt = AUTO_COLS.index("Next")
+            if isinstance(bar := t.cellWidget(r, nxt), QProgressBar):
+                bar.setValue(int((st.progress or 0) * 1000))
+                bar.setFormat(st.next or st.state)  # e.g. "disabled"
+            elif (it := t.item(r, nxt)) and it.text() != st.next:
+                it.setText(st.next)
+            status = t.item(r, AUTO_COLS.index("Status"))
+            if status:
+                color = ("#9e9e9e" if st.state in ("disabled", "automation OFF") or st.state.startswith("paused")
+                         else "#ef6c00" if st.state.startswith(("cooldown", "running")) else
+                         "#2e7d32" if st.ready or st.state == "waiting" else None)
+                status.setForeground(QColor(color) if color else QColor())
         state = "ON" if e.enabled else "OFF"
         extra = " (dry run)" if e.dry_run else ""
         paused = f" - PAUSED: {e.paused_reason}" if e.paused_reason else ""

@@ -86,6 +86,25 @@ def condition_report(cond: Condition, states: dict[int, ClientState | None], pre
     return (all(hits) if cond.slot == "all" else any(hits)), per
 
 
+def fmt_left(seconds: float) -> str:
+    """12 -> '12s', 725 -> '12m 05s', 3725 -> '1h 02m'"""
+    s = max(0, int(round(seconds)))
+    if s < 60:
+        return f"{s}s"
+    if s < 3600:
+        return f"{s // 60}m {s % 60:02d}s"
+    return f"{s // 3600}h {s % 3600 // 60:02d}m"
+
+
+@dataclass
+class RuleStatus:
+    state: str  # what the rule is doing now, e.g. "waiting", "cooldown 8s", "running step 2/4"
+    next: str  # when it fires next, in words
+    progress: float | None = None  # timers: 0..1 of the way to the next firing
+    last: str = ""  # "2m 10s ago"
+    ready: bool = False  # it would fire now if automation were on (state rule condition true)
+
+
 def _show(v: object) -> str:
     if isinstance(v, bool):
         return "yes" if v else "no"
@@ -141,11 +160,58 @@ class AutomationEngine:
             runtimes.append(rt)
         self.rules = runtimes
 
+    def status(self, rt: RuleRuntime, now: float) -> RuleStatus:
+        """What a rule is doing and when it fires next, for the Automation tab."""
+        r = rt.rule
+        last = f"{fmt_left(now - rt.last_fired)} ago" if rt.last_fired is not None else "never"
+        if not r.enabled:
+            return RuleStatus("disabled", "", None, last)
+        if r.name in self.paused_rules:
+            return RuleStatus("paused (open in the editor)", "", None, last)
+        if rt.running_step is not None:
+            steps = rt.run_steps if rt.run_steps is not None else rt.steps
+            return RuleStatus(f"running step {rt.running_step}/{len(steps)}", "", None, last)
+        cooling = r.cooldown - (now - rt.last_fired) if rt.last_fired is not None and r.cooldown else 0.0
+        if not self.enabled:
+            state = "automation OFF"
+        elif self.paused_reason:
+            state = f"paused: {self.paused_reason}"
+        elif cooling > 0:
+            state = f"cooldown {fmt_left(cooling)}"
+        else:
+            state = "waiting"
+        ready = False
+        progress = None
+        if r.every is not None:
+            if rt.next_due is None or not self.enabled:
+                nxt = f"{fmt_left(r.every)} after automation is turned on" if not self.enabled else \
+                    f"in {fmt_left(r.every)}"
+            else:
+                left = rt.next_due - now
+                nxt = f"in {fmt_left(left)}" if left > 0 else "now"
+                progress = min(1.0, max(0.0, 1 - left / r.every))
+        elif r.chat is not None:
+            nxt = "on a matching chat line"
+            if r.when is not None:
+                ok, _ = condition_report(r.when, self.source.states(), rt.preds)
+                nxt += " (condition true now)" if ok else " (but the condition is false now)"
+        else:
+            ok, per = condition_report(r.when, self.source.states(), rt.preds)
+            ready = ok
+            if ok:
+                nxt = "now: condition is true" if cooling <= 0 else "after the cooldown: condition is true"
+            else:
+                why = next((w for _, m, w in per if not m), "")
+                nxt = f"when the condition is true ({why})" if why else "when the condition is true"
+        return RuleStatus(state, nxt, progress, last, ready)
+
     def set_enabled(self, value: bool) -> None:
         self.enabled = value
-        if not value:
-            for rt in self.rules:
+        for rt in self.rules:
+            if not value:
                 rt.running_step = None
+            else:
+                rt.next_due = None  # timers start counting when automation is turned on, never fire at once
         self._event(f"automation {'ON' if value else 'OFF'}{' (dry run)' if value and self.dry_run else ''}")
 
     def kill(self) -> None:

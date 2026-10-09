@@ -182,7 +182,7 @@ On start, WoWBox attaches to every running `Wow.exe` window. It puts each window
 | **Clients** | One row per slot: character and class, label, role, PID, window, status, Broadcast checkbox (untick to leave a client out of broadcasts), HP, power, target, state flags (`combat casting TYPING following …`), and bridge health. Buttons: **Move up/down** swaps slots, **Remember characters** pins the current characters into `team.yaml`. |
 | **Routes** | The route table. A change takes effect as soon as you finish editing a cell. A bad row turns red and isn't used. **Save config** keeps the changes after a restart. |
 | **Macros** | Your macros with their hotkeys, whether they're running, and their steps. **New / Edit / Duplicate / Delete** open the macro editor (double-click edits too). Run/Stop, Stop all. |
-| **Automation** | Rules, their triggers and actions, and how often each has fired. **New / Edit / Duplicate / Delete** open the rule editor (double-click edits too). The *On* box enables or disables a rule, and the change is saved at once. |
+| **Automation** | Every rule with its trigger and actions, plus live columns: **Status** (waiting, cooldown 8s, running step 2/4, disabled, automation OFF), **Next** (timers get a countdown bar, e.g. *in 12m 05s*; state rules say whether the condition is true now and why not; chat rules wait for a line), **Last fired** and **Fired** (count). **New / Edit / Duplicate / Delete** open the rule editor (double-click edits too). The *On* box enables or disables a rule, and the change is saved at once. |
 | **Log** | Everything WoWBox does: keys typed, rules fired, chat lines seen, `/bb` commands. The same goes to `logs\wowbox.log`. |
 
 A tray icon offers the same switches. Its dot is green while broadcasting and red while not, with a yellow ring while automation is on. Closing the window quits WoWBox.
@@ -787,6 +787,19 @@ automation:
 - **Range and line of sight.** WoW's own rules still apply. Out of range shows the usual error on that client, and the rule doesn't retry.
 - **Text length.** Only the first 27 characters of a whisper reach WoWBox, so keywords should come early in the message.
 - **Exact names.** Spell names must match the game's exactly, including your server's custom spells.
+
+### Watching the rules run
+
+The **Automation** tab updates four times a second:
+
+| Column | Shows |
+|---|---|
+| **Status** | `waiting` (green), `cooldown 8s` or `running step 2/4` (orange), `disabled`, `automation OFF`, `paused: …` (grey) |
+| **Next** | **Timers:** a countdown bar filling up to the next firing, e.g. *in 12m 05s*. **State rules:** *now: condition is true*, or *when the condition is true (power_pct is 62, needs < 40)*. **Chat rules:** *on a matching chat line*. |
+| **Last fired** | how long ago, e.g. *2m 10s ago*, or *never* |
+| **Fired** | how many times since WoWBox started |
+
+Long triggers and actions are cut off with "…". Hover over them to see all of it. **Timers start when automation is turned on:** a timer never fires the moment you switch automation on, even if it came due while automation was off.
 
 ### Common to all rules
 

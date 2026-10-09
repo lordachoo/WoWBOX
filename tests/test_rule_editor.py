@@ -211,3 +211,46 @@ def test_editor_from_all_explains_itself(qapp):
         dlg.build()
     dlg.senders.setText("team, Randomfriend")
     assert dlg.build().chat.sender == ["team", "Randomfriend"]
+
+
+def test_rule_status_for_the_automation_tab():
+    from wowbox.automation.engine import fmt_left
+    assert (fmt_left(12), fmt_left(725), fmt_left(3725)) == ("12s", "12m 05s", "1h 02m")
+    cfg = AppConfig.model_validate({
+        "automation": [RULES[0] | {"enabled": True}, RULES[1], RULES[2], RULES[0] | {"name": "off"}],
+        "automation_options": {"enabled_on_start": False, "dry_run": True, "pause_on_stale_bridge": False}})
+    src = Src({3: ClientState(power_pct=62.0)})
+    e = AutomationEngine(cfg.automation, cfg.automation_options, None, src)
+    drink, rebuff, chat, off = e.rules
+    st = e.status(rebuff, 0)
+    assert st.state == "automation OFF" and st.next == "25m 00s after automation is turned on"
+    assert e.status(off, 0).state == "disabled"
+    e.set_enabled(True)
+    e.tick(100)  # arms the timer
+    st = e.status(rebuff, 100 + 60)
+    assert st.state == "waiting" and st.next == "in 24m 00s" and st.progress == pytest.approx(60 / 1500)
+    assert st.last == "never"
+    st = e.status(drink, 160)
+    assert not st.ready and st.next == "when the condition is true (power_pct is 62, needs < 40)"
+    src.st[3] = ClientState(power_pct=10.0)
+    e.tick(170)  # fires: dry run
+    st = e.status(drink, 175)
+    assert st.state == "cooldown 15s" and st.last == "5s ago" and st.next.startswith("after the cooldown")
+    assert e.status(chat, 175).next == "on a matching chat line"
+    e.paused_rules.add("heal-on-whisper")
+    assert e.status(chat, 175).state.startswith("paused")
+
+
+def test_turning_automation_on_restarts_timers():
+    """A timer that came due while automation was off must not fire the moment it's turned on."""
+    cfg = AppConfig.model_validate({"automation": [RULES[1]],
+                                    "automation_options": {"enabled_on_start": True, "dry_run": True,
+                                                           "pause_on_stale_bridge": False}})
+    e = AutomationEngine(cfg.automation, cfg.automation_options, None, Src({}))
+    e.tick(0)
+    e.set_enabled(False)
+    e.set_enabled(True)
+    e.tick(5000)  # long past the old due time
+    assert e.rules[0].fire_count == 0
+    e.tick(5000 + 1500)
+    assert e.rules[0].fire_count == 1
