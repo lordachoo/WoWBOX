@@ -40,6 +40,17 @@ class MacroRunner:
     def load(self, macros: list[MacroConfig]) -> None:
         self.macros = {m.name: (m, flatten(m.do)) for m in macros}
 
+    def saved(self) -> list[str]:
+        return [n for n in self.macros if n != self.TEST]
+
+    TEST = "(test)"
+
+    def run_config(self, macro: MacroConfig) -> threading.Thread | None:
+        """Run a macro that isn't saved yet (the editor's Test button)."""
+        self.stop(self.TEST)
+        self.macros[self.TEST] = (macro, flatten(macro.do))
+        return self.start(self.TEST)
+
     def describe(self, name: str) -> str:
         return describe(self.macros[name][1])
 

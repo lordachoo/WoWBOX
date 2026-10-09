@@ -12,3 +12,4 @@ config/*.bak
 *.spec
 .claude/
 *.egg-info/
+config/macros.yaml

@@ -12,6 +12,9 @@ from PySide6.QtCore import QObject, QTimer, Signal
 from .automation import AutomationEngine
 from .automation.macros import MacroRunner
 from .commands import TeamCommands
+from .config import MacroConfig
+from .keys import parse_chord
+from .macro_store import macros_path, migrate, save_macros
 from .follow import FollowManager
 from .stack import Stacker, StackManager, StackResult
 from .bridge import BridgePoller, ChatEvent, ClientState
@@ -276,6 +279,57 @@ class Controller(QObject):
         cut = "..." if ev.truncated else ""
         log.info("chat [%s] %s from %s: %s%s", listener, ev.channel, ev.sender, ev.text, cut)
         self.engine.on_chat(slot, ev, time.monotonic(), listener=listener)
+
+    # ------------------------------------------------------------------ macros (the editor)
+    def macro_hotkey_owner(self, key: str, ignore_macro: str | None = None) -> str | None:
+        """Who already uses hotkey `key` (another macro or a WoWBox hotkey), or None."""
+        try:
+            owner = self.router.hotkey_owner(parse_chord(key))
+        except ValueError:
+            return None
+        if owner is None or owner == f"macro:{ignore_macro}":
+            return None
+        return f"macro {owner.split(':', 1)[1]!r}" if owner.startswith("macro:") else f"the WoWBox {owner} hotkey"
+
+    def target_choices(self) -> list[str]:
+        out = ["all", "followers", "leader", "not:leader", "active"]
+        names = [c.character for c in self.team.clients.values() if c.character]
+        names += [s.character for s in self.cfg.team.slots.values() if s.character]
+        classes = sorted({c.class_token for c in self.team.clients.values() if c.class_token})
+        out += names + [f"class:{c}" for c in classes] + ["role:tank", "role:healer", "role:dps"]
+        return list(dict.fromkeys(out))
+
+    def save_macro(self, old_name: str | None, macro: MacroConfig) -> None:
+        """Add (old_name None) or replace a macro, write macros.yaml, and use it right away."""
+        macros = list(self.cfg.macros)
+        names = [m.name for m in macros]
+        if macro.name != old_name and macro.name in names:
+            raise ValueError(f"There's already a macro called {macro.name!r}.")
+        if old_name in names:
+            macros[names.index(old_name)] = macro
+        else:
+            macros.append(macro)
+        self._store_macros(macros)
+        log.info("macro %r saved", macro.name)
+
+    def delete_macro(self, name: str) -> None:
+        self.macros.stop(name)
+        self._store_macros([m for m in self.cfg.macros if m.name != name])
+        log.info("macro %r deleted", name)
+
+    def _store_macros(self, macros: list[MacroConfig]) -> None:
+        path = macros_path(self.cfg_path)
+        if path.exists():
+            save_macros(path, macros)
+        else:
+            migrate(self.cfg_path, macros)  # first edit: macros move out of team.yaml
+            log.info("macros are now kept in %s (team.yaml is left as you wrote it)", path)
+        self.cfg.macros = macros
+        self.router.set_hotkeys(self.cfg.hotkeys, macros)
+        self.macros.load(macros)
+        if hasattr(self, "window"):
+            self.window.load_macros()
+        self.sig_changed.emit()
 
     # ------------------------------------------------------------------ stacking
     def _client_state(self, slot: int) -> ClientState | None:

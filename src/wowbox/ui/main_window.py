@@ -322,14 +322,20 @@ class MainWindow(QMainWindow):
         self.macro_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.macro_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         self.macro_table.horizontalHeader().setStretchLastSection(True)
-        self.macro_table.cellDoubleClicked.connect(lambda row, _c: self._macro_toggle(row))
+        self.macro_table.cellDoubleClicked.connect(lambda row, _c: self._macro_edit(row))
         buttons = QHBoxLayout()
-        buttons.addWidget(QPushButton("Run / Stop", clicked=lambda: self._macro_toggle(self.macro_table.currentRow())))
+        row = self.macro_table.currentRow
+        for text, fn in (("New", lambda: self._macro_edit(None)), ("Edit", lambda: self._macro_edit(row())),
+                         ("Duplicate", lambda: self._macro_edit(row(), copy=True)),
+                         ("Delete", lambda: self._macro_delete(row()))):
+            buttons.addWidget(QPushButton(text, clicked=fn))
+        buttons.addSpacing(20)
+        buttons.addWidget(QPushButton("Run / Stop", clicked=lambda: self._macro_toggle(row())))
         buttons.addWidget(QPushButton("Stop all", clicked=self.c.macros.stop_all))
         buttons.addStretch(1)
-        hint = QLabel("Macros live in team.yaml (macros:). Edit there, then Reload config. Press a macro's hotkey in "
-                      "any WoW window (or double-click it here) to run it; press again to stop it. Targets can be "
-                      "a slot list, all/followers/leader, a character name, class:WARLOCK or role:healer.")
+        hint = QLabel("Double-click a macro to edit it. Press its hotkey in any WoW window to run it; press again "
+                      "to stop it. Macros are saved in config/macros.yaml (you can edit that by hand too, then "
+                      "Reload config).")
         hint.setWordWrap(True)
         w = QWidget()
         lay = QVBoxLayout(w)
@@ -340,7 +346,7 @@ class MainWindow(QMainWindow):
 
     def load_macros(self) -> None:
         t = self.macro_table
-        names = list(self.c.macros.macros)
+        names = self.c.macros.saved()
         t.setRowCount(len(names))
         for r, name in enumerate(names):
             m, _steps = self.c.macros.macros[name]
@@ -350,12 +356,52 @@ class MainWindow(QMainWindow):
             t.setItem(r, 3, _item(self.c.macros.describe(name)))
 
     def _macro_toggle(self, row: int) -> None:
-        names = list(self.c.macros.macros)
+        names = self.c.macros.saved()
         if 0 <= row < len(names):
             self.c.macros.toggle(names[row])
 
+    def _macro_edit(self, row: int | None, copy: bool = False) -> None:
+        from .macro_editor import MacroEditor
+        names = self.c.macros.saved()
+        macro = None
+        if row is not None:
+            if not 0 <= row < len(names):
+                return
+            macro = self.c.macros.macros[names[row]][0]
+        source = macro.name if macro else None
+        if macro and copy:
+            new_name = f"{macro.name}-copy"
+            while new_name in names:
+                new_name += "-copy"
+            macro = macro.model_copy(update={"name": new_name, "key": None})
+        old_name = None if copy else source
+        dlg = MacroEditor(self, macro, targets=self.c.target_choices(),
+                          macro_names=[n for n in names if n != old_name],
+                          conflict=lambda key: self.c.macro_hotkey_owner(key, ignore_macro=old_name),
+                          on_test=self.c.macros.run_config)
+        if copy:
+            dlg.setWindowTitle(f"New macro (copy of {source})")
+        self.c.router.hotkeys_paused = True  # so recording a hotkey doesn't also fire it
+        try:
+            accepted = dlg.exec()
+        finally:
+            self.c.router.hotkeys_paused = False
+            self.c.macros.stop(self.c.macros.TEST)
+        if accepted and dlg.result_macro:
+            try:
+                self.c.save_macro(old_name, dlg.result_macro)
+            except Exception as e:
+                QMessageBox.warning(self, "Macro not saved", str(e))
+
+    def _macro_delete(self, row: int) -> None:
+        names = self.c.macros.saved()
+        if not 0 <= row < len(names):
+            return
+        if QMessageBox.question(self, "Delete macro", f"Delete the macro {names[row]!r}?") == QMessageBox.Yes:
+            self.c.delete_macro(names[row])
+
     def refresh_macros(self) -> None:
-        for r, name in enumerate(self.c.macros.macros):
+        for r, name in enumerate(self.c.macros.saved()):
             it = self.macro_table.item(r, 2)
             text = "RUNNING" if self.c.macros.is_running(name) else ""
             if it and it.text() != text:

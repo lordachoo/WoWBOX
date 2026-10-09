@@ -57,6 +57,7 @@ class Router:
         self.mirror_vks: set[int] = set()
         self.mirror_target: Target = "followers"
         self.last_movement = -1e9  # monotonic time of the last movement key event
+        self.hotkeys_paused = False  # e.g. while the macro editor records a hotkey
         self.set_hotkeys(hotkeys, macros or [])
         self._own_pid = os.getpid()
         self._q: queue.SimpleQueue = queue.SimpleQueue()
@@ -77,6 +78,10 @@ class Router:
         if self._sender:
             self._sender.join(2)
             self._sender = None
+
+    def hotkey_owner(self, chord: Chord) -> str | None:
+        """What a chord is already bound to: a hotkey name or macro:<name>."""
+        return self._hotkeys.get(chord)
 
     def set_hotkeys(self, hk: HotkeyConfig, macros: list | None = None) -> None:
         table = {}
@@ -162,7 +167,7 @@ class Router:
         fg = self.windows.foreground()
         active = self.team.slot_for_hwnd(fg)
 
-        name = self._hotkeys.get(chord)
+        name = None if self.hotkeys_paused else self._hotkeys.get(chord)
         if name and name.startswith("macro:") and active is not None and self.chatguard.paused(active):
             name = None  # you're typing in chat: let the key through as text
         if name and (active is not None or self._is_own_window(fg)):

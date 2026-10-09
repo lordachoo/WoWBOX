@@ -178,7 +178,7 @@ On start, WoWBox attaches to every running `Wow.exe` window. It puts each window
 |---|---|
 | **Clients** | One row per slot: character and class, label, role, PID, window, status, Broadcast checkbox (untick to leave a client out of broadcasts), HP, power, target, state flags (`combat casting TYPING following …`), and bridge health. Buttons: **Move up/down** swaps slots, **Remember characters** pins the current characters into `team.yaml`. |
 | **Routes** | The route table, editable live. Save config writes it back. |
-| **Macros** | Your macros with their hotkeys, whether they're running, and their steps. Double-click or Run/Stop. |
+| **Macros** | Your macros with their hotkeys, whether they're running, and their steps. **New / Edit / Duplicate / Delete** open the macro editor (double-click edits too). Run/Stop, Stop all. |
 | **Automation** | Rules, their triggers and actions, enable checkboxes, and how often each has fired. |
 | **Log** | Everything WoWBox does: keys typed, rules fired, chat lines seen, `/bb` commands. The same goes to `logs\wowbox.log`. |
 
@@ -377,7 +377,25 @@ follow:
 
 ## 12. Macros
 
-Broadcasting sends the *same* key everywhere. A macro sends *specific* things to *specific* characters when you press its hotkey in any WoW window, or double-click it in the Macros tab. Pressing the hotkey again stops a macro that's still running.
+Broadcasting sends the *same* key everywhere. A macro sends *specific* things to *specific* characters when you press its hotkey in any WoW window, or press Run in the Macros tab. Pressing the hotkey again stops a macro that's still running.
+
+### The macro editor
+
+In the **Macros** tab, use **New**, **Edit** (or double-click a macro), **Duplicate** or **Delete**.
+
+- **Name** and **Note:** free text. Names must be unique.
+- **Hotkey:** click the field, then press the combination (e.g. Ctrl+Alt+H). Backspace or Clear removes it. If the combination already belongs to another macro or a WoWBox hotkey, the editor says so and won't save. While the editor is open, WoWBox hotkeys are paused, so recording F12 doesn't also stack your team.
+- **Steps:** one row per step, run top to bottom. **Add step** inserts below the selected row and copies its *To*. **Remove**, **Move up** and **Move down** do what they say. The columns are:
+  - **Step:** what kind of step it is. *Type chat line*, *Press key*, *Press keys* (comma-separated, *Delay* apart), *Wait*, or *Start macro*.
+  - **Value:** the chat line, key, key list, duration (`300ms`, `1.5s`) or macro name.
+  - **To:** pick from your characters, `all`, `followers`, `leader`, `not:leader`, `class:…`, `role:…`, or type anything from section 8. For slots, type something like `[2, 3]`.
+  - **Delay:** only for *Press keys*.
+- **Test (run now):** runs the macro as it stands in the editor, without saving.
+- **Save:** checks everything first. Problems, such as a bad key name or an empty step, show in red with the step number. A saved macro works immediately, with no Reload needed.
+
+The editor saves to **`config/macros.yaml`**, next to `team.yaml`. The first time you save, your existing macros move over from `team.yaml`. WoWBox removes only the `macros:` block from `team.yaml`, leaves a comment in its place, and keeps a `team.yaml.bak`. Everything else in `team.yaml`, comments included, stays as you wrote it. Once `macros.yaml` exists, it's the only place macros are read from. You can still edit it by hand, then press **Reload config**.
+
+The format is the same whether the macros are in `macros.yaml` or `team.yaml`:
 
 ```yaml
 macros:
@@ -409,7 +427,7 @@ macros:
 Every step except `wait`, `sequence` and `macro` takes `to:` (default `all`).
 
 - **Held modifiers.** A macro waits until you've released Ctrl/Alt/Shift before its first step, so a `Ctrl+Alt+…` hotkey doesn't turn `1` into `Ctrl+Alt+1`.
-- **Editing.** Edit `team.yaml`, then press **Reload config**.
+- **Editing by hand.** Edit `macros.yaml` (or `team.yaml`, before the first editor save), then press **Reload config**.
 - **Tip.** For something you press constantly, an in-game macro bound to a key plus a route (`keys: ["F6"], to: Gnope`) is faster than typing into chat.
 
 ### Using items and casting spells
@@ -564,7 +582,7 @@ Everything lives in `config\team.yaml`. The exe uses `config\team.yaml` next to 
 | `follow`, `stack` | section 11 |
 | `routes` | list of `{keys, to, note}` (section 9) |
 | `bridge` | `enabled`, `hz` (10), `block_size` (8, match `/bb size`), `method` (auto / mss / dxcam / printwindow), `stale_after` (1.5s), `commands` (true) |
-| `macros` | section 12 |
+| `macros` | section 12. Kept in `config/macros.yaml` once you've saved from the macro editor. |
 | `automation` | section 13 |
 | `automation_options` | `enabled_on_start` (false), `dry_run` (true), `tick_hz` (10), `pause_on_stale_bridge` (true) |
 | `memread` | optional read-only memory reader: `enabled` (false), `hz`, `fields: {name: {address, module, offsets, type}}`. No addresses ship with WoWBox; you supply and verify them. |
@@ -588,7 +606,7 @@ Close the exe before rebuilding: Windows locks a running exe.
 
 ```
 addon/BoxBridge/        the WoW addon (Lua): state strip, chat lines, /bb commands
-config/                 team.example.yaml (tracked), team.yaml (yours, not tracked)
+config/                 team.example.yaml (tracked), team.yaml + macros.yaml (yours, not tracked)
 packaging/              build.ps1 + PyInstaller entry point
 spikes/                 Phase 0 experiments (see spikes/README.md and RESULTS.md)
 src/wowbox/
@@ -603,10 +621,12 @@ src/wowbox/
   router/               keyboard hook → route table → sender thread; chat guard
   bridge/               pixel decoder (state + chat + commands) and capture poller
   automation/           steps, macro runner, rule engine
+  macro_store.py        macros.yaml: load, save, the one-time move out of team.yaml
+  commands.py           /bb team commands (the client you typed in goes last)
   layout/               grid maths, thumbnail strip, tab bar, layout manager
   platform/             Win32 windows / input / capture (ctypes), and fakes for tests
   memread/              optional read-only memory reader
-  ui/                   main window, tray icon, overlay
+  ui/                   main window, macro editor, tray icon, overlay
 tests/                  pytest suite
 wowbox-project-plan.md  the original design plan
 ```

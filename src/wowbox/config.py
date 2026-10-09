@@ -1,6 +1,7 @@
 """team.yaml: pydantic models, load and save."""
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
 from typing import Annotated, Any, Literal, Union
@@ -9,6 +10,8 @@ import yaml
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator, model_validator
 
 from .keys import expand_key_spec, parse_chord
+
+log = logging.getLogger(__name__)
 
 Role = Literal["tank", "healer", "dps"]
 LayoutName = Literal["grid_auto", "grid_2x2", "grid_1x3", "main_thumbs", "tabs"]
@@ -317,7 +320,17 @@ class AppConfig(_Model):
 
 
 def load_config(path: str | Path) -> AppConfig:
-    data = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+    """team.yaml, with the macros from macros.yaml next to it when that file exists (it then replaces any
+    `macros:` section in team.yaml)."""
+    path = Path(path)
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    macros_file = path.with_name("macros.yaml")
+    if macros_file.exists():
+        mdata = yaml.safe_load(macros_file.read_text(encoding="utf-8")) or {}
+        if data.get("macros"):
+            log.warning("%s has a macros: section; it's ignored because %s exists",
+                                                path.name, macros_file.name)
+        data["macros"] = mdata.get("macros") or []
     return AppConfig.model_validate(data)
 
 
@@ -327,4 +340,6 @@ def save_config(cfg: AppConfig, path: str | Path) -> None:
     if path.exists():
         path.with_suffix(path.suffix + ".bak").write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
     data = cfg.model_dump(mode="json", exclude_none=True)
+    if path.with_name("macros.yaml").exists():
+        data.pop("macros", None)  # they live in macros.yaml
     path.write_text(yaml.safe_dump(data, sort_keys=False, allow_unicode=True), encoding="utf-8")
