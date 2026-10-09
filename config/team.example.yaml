@@ -69,8 +69,8 @@ stack:                          # F12 / Stack button / "/bb stack": walk followe
   who: all                      # who gets stacked (the character they stack on is left out)
   on_stop: true                 # while mirroring movement: re-stack every time you stop
   on_stop_delay: 400ms
-  tolerance_yards: 0.5
-  facing_tolerance_deg: 3       # widened automatically when a client's frame rate is low
+  tolerance_yards: 0.1
+  facing_tolerance_deg: 1       # can't beat half a frame of turning: 1.5 deg at 60 fps, 0.75 at 120
   timeout: 10s
   run_speed: 7.0                # yards/s unmounted; turns measured speed into yards
   map_aspect: 1.5               # zone maps are 3:2

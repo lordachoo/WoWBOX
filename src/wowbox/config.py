@@ -277,8 +277,8 @@ class StackConfig(_Model):
     who: Target = "all"  # who gets stacked (the character they stack on is always left out)
     on_stop: bool = True  # while mirroring movement: re-stack every time you stop moving
     on_stop_delay: Duration = 0.4  # how long you must have stopped first
-    tolerance_yards: float = 0.5
-    facing_tolerance_deg: float = 3.0
+    tolerance_yards: float = 0.1
+    facing_tolerance_deg: float = 1.0  # below half a frame of turning isn't possible: raise the fps
     timeout: Duration = 10.0  # give up on a follower after this long
     run_speed: float = 7.0  # yards/s, to turn the measured speed into yards (unmounted run)
     turn_rate_deg: float = 180.0  # first guess for keyboard turning; measured as it goes

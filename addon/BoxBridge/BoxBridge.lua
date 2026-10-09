@@ -21,7 +21,7 @@
 
 local NUM_BYTES = 56
 local NUM_BLOCKS = NUM_BYTES / 2
-local MAGIC_A, MAGIC_B, MAGIC_CHAT = 0xB0, 0x0D, 0x0C
+local MAGIC_A, MAGIC_B, MAGIC_CHAT = 0xB0, 0x0E, 0x0C
 local CLASS_IDS = { WARRIOR = 1, PALADIN = 2, HUNTER = 3, ROGUE = 4, PRIEST = 5, DEATHKNIGHT = 6, SHAMAN = 7,
   MAGE = 8, WARLOCK = 9, DRUID = 11 }
 local MARK_EVEN, MARK_ODD = 224, 32
@@ -125,6 +125,13 @@ local function chatFrame(ev)
   return d
 end
 
+local function u24(out, n)
+  n = math.floor(n + 0.5) % 16777216
+  out[#out + 1] = math.floor(n / 65536)
+  out[#out + 1] = math.floor(n / 256) % 256
+  out[#out + 1] = n % 256
+end
+
 local function u16(out, n)
   n = math.floor(n + 0.5) % 65536
   out[#out + 1] = math.floor(n / 256)
@@ -140,12 +147,11 @@ local function addPosition(out)
   local facing = GetPlayerFacing and GetPlayerFacing() or 0
   local mapId = GetCurrentMapAreaID and GetCurrentMapAreaID() or 0
   local level = GetCurrentMapDungeonLevel and GetCurrentMapDungeonLevel() or 0
-  u16(out, math.max(0, math.min(1, x)) * 65535)
-  u16(out, math.max(0, math.min(1, y)) * 65535)
+  u24(out, math.max(0, math.min(1, x)) * 16777215)
+  u24(out, math.max(0, math.min(1, y)) * 16777215)
   u16(out, facing / (2 * math.pi) * 65536)
   u16(out, mapId)
-  out[#out + 1] = level % 256
-  out[#out + 1] = valid and 1 or 0
+  out[#out + 1] = (valid and 1 or 0) + (level % 128) * 2
   out[#out + 1] = math.min(255, math.floor((GetFramerate and GetFramerate() or 0) + 0.5))
 end
 
@@ -186,7 +192,7 @@ local function snapshot()
     partyHp[1], partyHp[2], partyHp[3], partyHp[4],
     level, partyBits,
   }
-  addText(d, UnitName("player"), 24)
+  addText(d, UnitName("player"), 23)
   d[#d + 1] = CLASS_IDS[classToken or ""] or 0
   addPosition(d)
   return d

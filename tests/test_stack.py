@@ -108,8 +108,8 @@ def test_stacks_onto_anchor(east, south, facing):
     w.add(2, 500 + east, 500 + south, facing)
     r = stacker(w).stack(2, 1)
     assert r.ok, r.message
-    assert w.distance(1, 2) < 0.5 and w.facing_error_deg(1, 2) < 3.0
-    assert r.distance_yards == pytest.approx(w.distance(1, 2), abs=0.15)
+    assert w.distance(1, 2) < 0.15 and w.facing_error_deg(1, 2) < 2.0  # 60 fps: half a frame of turning is 1.5 deg
+    assert r.distance_yards == pytest.approx(w.distance(1, 2), abs=0.1)
     assert not any(w.chars[2]["held"]) and not w.pending  # every key let go
 
 
@@ -143,9 +143,9 @@ def test_lower_background_fps_still_converges():
     w = World(fps=30, latency=0.08)
     w.add(1, 500, 500, 1.0)
     w.add(2, 507, 503, 4.0)
-    r = stacker(w, tolerance_yards=0.6).stack(2, 1)
+    r = stacker(w).stack(2, 1)
     assert r.ok, r.message
-    assert w.distance(1, 2) < 0.6
+    assert w.distance(1, 2) < 0.25 and w.facing_error_deg(1, 2) < 4.0  # 30 fps: 3 deg a frame
 
 
 def test_different_map_and_no_position():
@@ -210,3 +210,25 @@ def test_manager_runs_followers_and_reports():
     assert [r.slot for r in results] == [2, 3] and all(r.ok for r in results), results
     assert w.distance(1, 2) < 0.5 and w.distance(1, 3) < 0.5
     assert not m.running
+
+
+def test_high_fps_gets_sub_degree():
+    w = World(fps=120, latency=0.08)
+    w.add(1, 500, 500, 4.0)
+    w.add(2, 505, 492, 0.7)
+    r = stacker(w).stack(2, 1)
+    assert r.ok and r.fps == 120
+    assert w.distance(1, 2) < 0.1 and w.facing_error_deg(1, 2) <= 1.0
+
+
+def test_restack_when_close_but_not_within_tolerance():
+    """Reported: stacking again did 0 moves while 0.38 yd off. Off by more than half a frame -> it moves."""
+    w = World()
+    w.add(1, 500, 500, 1.0)
+    w.add(2, 506, 503, 3.0)
+    s = stacker(w)
+    s.stack(2, 1)
+    w.chars[2]["e"] += 0.38
+    w.sleep(0.3)
+    r = s.stack(2, 1)
+    assert r.ok and r.moves >= 1 and w.distance(1, 2) < 0.15

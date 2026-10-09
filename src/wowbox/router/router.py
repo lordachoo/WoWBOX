@@ -81,7 +81,7 @@ class Router:
     def set_hotkeys(self, hk: HotkeyConfig, macros: list | None = None) -> None:
         table = {}
         for name in ("toggle_broadcast", "release_all", "cycle_layout", "next_main", "automation_kill",
-                     "follow", "stay", "mirror_movement"):
+                     "follow", "stay", "stack", "mirror_movement"):
             if (spec := getattr(hk, name)) is not None:
                 table[parse_chord(spec)] = name
         for slot, spec in hk.focus_slot.items():

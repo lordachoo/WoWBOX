@@ -144,3 +144,13 @@ def test_send_chord_skips_typing_clients(rig):
     rig.team.clients[2].state = ClientState(typing=True)
     sent = rig.router.send_chord(parse_chord("F5"), "all")
     assert sent == [1, 3, 4]
+
+
+def test_every_hotkey_name_in_config_is_registered():
+    """Each HotkeyConfig field must reach the router (stack was missed once)."""
+    from wowbox.config import HotkeyConfig
+    r = Rig()
+    names = set(r.router._hotkeys.values())
+    for field in HotkeyConfig.model_fields:
+        if field != "focus_slot":
+            assert field in names, field

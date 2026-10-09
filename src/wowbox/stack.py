@@ -14,7 +14,8 @@ up with the same delay), so each correction lands close and the next one is smal
 
 The game only applies a key on its next frame, so the smallest move or turn is one frame's worth: at 60 fps
 that's 3 degrees or 0.12 yards, at 20 fps 9 degrees and 0.35 yards. BoxBridge reports the client's frame rate;
-holds are never shorter than a frame, and the tolerances never tighter than a frame allows.
+every key is held for a whole number of frame-times (which the game turns into exactly that many frames of
+movement), and the tolerances are never tighter than half a frame allows.
 
 Map coordinates: x runs west to east, y north to south, both 0-1 across the zone map. Zone maps are 3:2,
 so one x unit is `map_aspect` times as many yards as one y unit. Facing: 0 = north, counter-clockwise.
@@ -35,10 +36,9 @@ from .keys import parse_chord
 log = logging.getLogger(__name__)
 
 PROBE_HOLD = 0.25  # first move of a kind, to measure its speed
-MIN_HOLD, MAX_HOLD = 0.02, 4.0
-FRAME_MARGIN = 1.3  # hold at least this many frames (a shorter press can land within one frame and do nothing)
-QUANTUM_SLACK = 0.6  # accept errors up to this many frames' worth of movement
-MAX_TURN_HOLD = 2.5
+MAX_HOLD = 4.0
+QUANTUM_SLACK = 0.55  # an error under half a frame's worth of movement can't be corrected (whole frames only)
+COARSE_FACING_DEG = 8.0  # facing needed while walking; the exact facing is set at the end
 MAX_STEPS = 16
 FRESH_FRAMES = 3  # bridge frames to wait after a move, so the reading shows its result (the game only sees a
 FRESH_MIN = 0.15  # key-up on its next frame, and a capture may show a frame drawn before that)
@@ -77,6 +77,7 @@ class StackResult:
     facing_error_deg: float | None = None
     moves: int = 0
     message: str = ""
+    fps: int = 0
 
 
 class Stacker:
@@ -140,22 +141,22 @@ class Stacker:
             self.post(slot, vk, False)
 
     @staticmethod
-    def _frame(st: ClientState) -> float:
-        return 1.0 / st.fps if st.fps else 1.0 / 60
+    def _fps(st: ClientState) -> float:
+        return float(st.fps) if st.fps else 60.0
 
-    def _min_hold(self, st: ClientState) -> float:
-        return max(MIN_HOLD, FRAME_MARGIN * self._frame(st))
+    def turn_rate(self) -> float:
+        return self._turn_rate or math.radians(self.cfg.turn_rate_deg)
 
     def facing_tolerance(self, st: ClientState) -> float:
-        rate = self._turn_rate or math.radians(self.cfg.turn_rate_deg)
-        return max(math.radians(self.cfg.facing_tolerance_deg), QUANTUM_SLACK * rate * self._frame(st))
+        """The configured tolerance, or half a frame of turning if that's coarser (nothing finer is possible)."""
+        return max(math.radians(self.cfg.facing_tolerance_deg), QUANTUM_SLACK * self.turn_rate() / self._fps(st))
 
     def distance_tolerance(self, st: ClientState) -> float | None:
         """In map units, or None while the speed is unknown."""
         upy = self.units_per_yard(st)
         if upy is None:
             return None
-        return max(self.cfg.tolerance_yards * upy, QUANTUM_SLACK * self._speed(st, "forward") * self._frame(st))
+        return max(self.cfg.tolerance_yards * upy, QUANTUM_SLACK * self._speed(st, "forward") / self._fps(st))
 
     def _speed(self, st: ClientState, key: str) -> float | None:
         mk = (st.map_id, st.map_level)
@@ -180,21 +181,32 @@ class Stacker:
         """Anchor minus me, in map units with x stretched to the same scale as y."""
         return (anchor.map_x - me.map_x) * self.cfg.map_aspect, anchor.map_y - me.map_y
 
+    def _press_frames(self, slot: int, key: str, frames: int, me: ClientState, cancel: threading.Event) -> float:
+        """Hold `key` for exactly `frames` game frames. A hold of n frame-times always spans exactly n frame
+        boundaries, wherever it starts, so the game applies exactly n frames of movement. Returns the seconds held."""
+        seconds = min(MAX_HOLD, frames / self._fps(me))
+        self._hold(slot, key, seconds, cancel)
+        return seconds
+
     # ------------------------------------------------------------------ turning
-    def face(self, slot: int, target: float, cancel: threading.Event, me: ClientState | None = None) -> ClientState:
+    def face(self, slot: int, target: float, cancel: threading.Event, me: ClientState | None = None,
+             tolerance: float | None = None) -> ClientState:
+        """Turn to `target` until within `tolerance` (default: the fine facing tolerance), or until the rest is
+        less than half a frame of turning."""
         me = me or self._fresh(slot, cancel)
-        for _ in range(8):
+        for _ in range(10):
             diff = wrap(target - me.facing)
-            if abs(diff) <= self.facing_tolerance(me):
+            if abs(diff) <= (tolerance if tolerance is not None else self.facing_tolerance(me)):
                 return me
+            frames = round(abs(diff) / self.turn_rate() * self._fps(me))
+            if frames == 0:
+                return me  # as close as whole frames get
             key = "turn_left" if diff > 0 else "turn_right"  # turning left raises the facing angle
-            rate = self._turn_rate or math.radians(self.cfg.turn_rate_deg)
-            hold = min(MAX_TURN_HOLD, max(self._min_hold(me), abs(diff) / rate))
-            self._hold(slot, key, hold, cancel)
+            held = self._press_frames(slot, key, frames, me, cancel)
             after = self._fresh(slot, cancel)
             turned = abs(wrap(after.facing - me.facing))
-            if hold >= 0.06 and turned > 0.03:
-                measured = turned / hold
+            if turned > 0:
+                measured = turned / held
                 self._turn_rate = measured if self._turn_rate is None else \
                     self._turn_rate + (measured - self._turn_rate) * SPEED_SMOOTHING
             me = after
@@ -205,46 +217,53 @@ class Stacker:
         cancel = cancel or threading.Event()
         deadline = self.clock() + self.cfg.timeout
         moves = 0
+        coarse = math.radians(COARSE_FACING_DEG)
         try:
             me, target = self._pose(slot), self._pose(anchor)
             if (me.map_id, me.map_level) != (target.map_id, target.map_level):
                 raise StackError("not on the same map as the anchor")
             if me.following:  # /follow would fight us: any movement key breaks it
-                self._hold(slot, "back", MIN_HOLD, cancel)
-            me = self.face(slot, target.facing, cancel)
+                self._press_frames(slot, "back", 1, me, cancel)
+            # 1. roughly face the anchor's way: moves are measured along the actual facing, so rough is enough
+            me = self.face(slot, target.facing, cancel, tolerance=coarse)
+            # 2. walk onto the spot, one axis at a time, in whole frames
             for _ in range(MAX_STEPS):  # `me` is always a reading taken after the last move
                 if self.clock() > deadline:
                     raise StackError("timed out")
                 target = self._pose(anchor)
                 dx, dy = self._offset(me, target)
                 tol = self.distance_tolerance(me)
-                close = tol is not None and math.hypot(dx, dy) <= tol
-                facing_off = abs(wrap(target.facing - me.facing))
-                facing_tol = self.facing_tolerance(me)
-                if close and facing_off <= facing_tol:
+                if tol is not None and math.hypot(dx, dy) <= tol:
                     break
-                if facing_off > (facing_tol if close else 2 * facing_tol):
-                    me = self.face(slot, target.facing, cancel, me)
+                if abs(wrap(target.facing - me.facing)) > 2 * coarse:
+                    me = self.face(slot, target.facing, cancel, me, tolerance=coarse)
                     continue
                 fx, fy = forward_vector(me.facing)
                 rx, ry = right_vector(me.facing)
                 along, side = dx * fx + dy * fy, dx * rx + dy * ry
-                if abs(along) >= abs(side):
-                    comp, axis, key = along, (fx, fy), "forward" if along > 0 else "back"
-                else:
-                    comp, axis, key = side, (rx, ry), "strafe_right" if side > 0 else "strafe_left"
-                speed = self._speed(me, key)
-                hold = PROBE_HOLD if speed is None else min(MAX_HOLD, max(self._min_hold(me), abs(comp) / speed))
-                self._hold(slot, key, hold, cancel)
+                moves_possible = []
+                for comp, axis, pos_key, neg_key in ((along, (fx, fy), "forward", "back"),
+                                                     (side, (rx, ry), "strafe_right", "strafe_left")):
+                    key = pos_key if comp > 0 else neg_key
+                    speed = self._speed(me, key)
+                    frames = round(PROBE_HOLD * self._fps(me)) if speed is None else \
+                        round(abs(comp) / speed * self._fps(me))
+                    moves_possible.append((frames, comp, axis, key))
+                frames, comp, axis, key = max(moves_possible, key=lambda m: (m[0], abs(m[1])))
+                if frames == 0:
+                    break  # both axes are within half a frame of movement: as close as whole frames get
+                held = self._press_frames(slot, key, frames, me, cancel)
                 moves += 1
                 after = self._fresh(slot, cancel)
                 ex, ey = (after.map_x - me.map_x) * self.cfg.map_aspect, after.map_y - me.map_y
                 moved = (ex * axis[0] + ey * axis[1]) * (1 if comp > 0 else -1)
-                if hold >= 0.06 and moved > 0:
-                    self._learn(me, key, moved / hold)
+                if moved > 0:
+                    self._learn(me, key, moved / held)
                 me = after
             else:
                 raise StackError("didn't get there in %d moves" % MAX_STEPS)
+            # 3. fine facing last: turning on the spot doesn't move you
+            me = self.face(slot, self._pose(anchor).facing, cancel, me)
             return self._result(slot, True, me, self._pose(anchor), moves, "stacked")
         except StackError as e:
             try:
@@ -257,7 +276,7 @@ class Stacker:
         upy = self.units_per_yard(me)
         dist = math.hypot(*self._offset(me, target)) / upy if upy else None
         err = math.degrees(abs(wrap(target.facing - me.facing)))
-        return StackResult(slot, ok, dist, err, moves, message)
+        return StackResult(slot, ok, dist, err, moves, message, fps=me.fps)
 
 
 class StackManager:

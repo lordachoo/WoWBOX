@@ -48,7 +48,7 @@ It works from outside the game. WoWBox never injects code into WoW or modifies i
 | **Character-aware** | Characters are recognised by name, so the warlock lands in its slot whatever order you start the clients in. Targets can be a name, `class:WARLOCK` or `role:healer`. |
 | **Team commands** | Type `/bb all reload` in any client and every client does `/reload`. Also `/bb others …` and `/bb to Gnope …`. |
 | **Follow mode** | One key puts everyone on `/follow`. WoWBox re-follows anyone whose follow breaks, but not mid-cast or mid-fight. |
-| **Stacking** | One key walks every follower onto your exact spot and facing (within about half a yard and a few degrees), using positions from BoxBridge. |
+| **Stacking** | One key walks every follower onto your exact spot and facing (typically within 0.1 yd and 1°), using positions from BoxBridge. |
 | **Movement mirroring** | Optionally copies your W/A/S/D/Q/E/Space to the followers, so they move in lockstep with you. They re-stack every time you stop. |
 | **Macros** | A hotkey runs a sequence: type `/assist Tinkerdawn` on Gnope, then press 1–9 and 0 a second apart. |
 | **Automation** | Rules triggered by state ("healer mana < 40 % and out of combat → drink"), by timers, or by chat ("Tinkerdawn whispers *heal* → Kunth heals him"). Off and in dry run by default. |
@@ -194,7 +194,7 @@ Hotkeys work while a WoW client or WoWBox has focus. Change them under `hotkeys:
 | Ctrl+Alt+Pause | release all keys (stuck-key panic button) |
 | F10 | **follow**: followers target the leader and `/follow`; follow mode ON |
 | F11 | **stay**: followers stop; follow mode OFF |
-| F12 | **stack**: everyone walks onto the spot and facing of the window you're in |
+| F12 | **stack**: everyone walks onto the spot and facing of the window you're in. WoWBox takes F12 over from any in-game F12 binding; change `hotkeys.stack` if you need that binding. |
 | Ctrl+Alt+M | movement mirroring on/off |
 | Ctrl+Alt+L | next layout |
 | Ctrl+Alt+N | next client becomes main (main_thumbs / tabs) |
@@ -315,21 +315,31 @@ Mirrored movement only stays together if everyone starts on the same spot, facin
 
 1. BoxBridge reports every character's map position, facing and frame rate (the **Position** column in the Clients tab).
 2. For each follower, WoWBox:
-   - turns it with A/D to face the way the anchor faces;
+   - turns it with A/D to roughly face the way the anchor faces;
    - moves it without turning: W/S along its facing, Q/E sideways;
-   - after every move, waits for a fresh reading and corrects again.
-3. It usually finishes in 1–5 seconds, within about **half a yard and 3°**. All followers stack at the same time.
+   - after every move, waits for a fresh reading and corrects again;
+   - finally turns it to the anchor's exact facing (turning on the spot doesn't move it).
+3. It usually finishes in about 3 seconds. All followers stack at the same time.
 
 More details:
 - **No speeds are guessed.** The first move of each kind is a short probe. From then on, WoWBox measures how fast each key moves or turns the character on this map and uses that.
 - **The anchor** is the window you're in when you press F12, or the client where you typed `/bb stack`. If you press F12 in WoWBox itself, the leader is the anchor.
 - **Mirroring plus stacking is lockstep.** With mirroring on, the followers restack every time you stop moving (`stack.on_stop`). This replaces `/follow` while mirroring, because follow would pull them behind you. Press your movement keys and they move with you. Stop, and any drift is corrected within a second or two.
 - **You can always take over.** Pressing a movement key yourself cancels a running stack. So does pressing F12 again.
-- **Frame rate matters.** WoW only notices a key on its next frame, so a character can't turn less than one frame's worth. At 60 fps that's 3°. At 20 fps it's 9°, and stacking widens its tolerance to match. Background WoW windows often run at a reduced frame rate, so raise it on every client once:
+- **Frame rate sets the precision.** WoW applies a key once per frame, so the smallest turn or step is one frame's worth. WoWBox holds every key for a whole number of frames, which makes each correction exact. What's left is at most half a frame of turning or walking. Simulated results:
+
+  | Client fps | Typical | Worst |
+  |---|---|---|
+  | 120–144 | 0.03 yd, 0.4° | 0.1 yd, 1.0° |
+  | 60 | 0.06 yd, 1.0° | 0.13 yd, 2.0° |
+  | 30 | 0.10 yd, 1.9° | 0.18 yd, 3.6° |
+
+  The defaults (`tolerance_yards: 0.1`, `facing_tolerance_deg: 1`) widen automatically to half a frame when the frame rate can't do better. **To get facing under 1°, run the clients at 120 fps or more**, background windows included:
   ```
-  /bb all console maxfpsbk 60
+  /bb all console maxfpsbk 144
+  /bb all console maxfps 144
   ```
-  Check the frame rates in the Position column.
+  Check the result in the Position column, which shows each client's fps. Your PC has to manage that rate for all clients at once.
 - **Where it works:** anywhere the client gives map coordinates. That includes the EQ zones on your server (tested with `GetPlayerMapPosition`). In a place without coordinates, the Position column stays empty and stacking reports "no map position". Use follow there.
 - **Keep the world map closed.** Positions are relative to the map being shown, so while a client has its world map open, that client reports no position.
 - **Mounted, walking or slowed:** the measured speed adapts. Tolerances in yards assume the normal 7 yd/s run speed (`stack.run_speed`).
@@ -579,7 +589,7 @@ They use fake Win32 implementations, so nothing touches real windows.
 | Follow mode doesn't re-follow | Does the State column show `following` while a character follows? If not, `/reload` that client for the current addon. Re-follow also waits during combat or casting, and for the window you're in. |
 | Mirrored movement does nothing in background windows | That client ignores posted movement keys. Use follow mode without mirroring. |
 | Stack fails with "no map position" | No coordinates in that area, or that client's world map is open. |
-| Stack ends a few degrees off, or slowly | Low background frame rate: `/bb all console maxfpsbk 60`, and check fps in the Position column. |
+| Stack ends a degree or two off | That's half a frame of turning at that client's frame rate. Raise it: `/bb all console maxfpsbk 144` and check the fps in the Position column. |
 | Stack turns the wrong way or strafes instead of turning | A/D aren't bound to turn left/right on that character. Set the `stack.*` keys. |
 | Game blurry or stretched | Set the in-game resolution to the window size (section 14). |
 | Black screen after arranging | D3D device reset. Arrange at character select, or use Restore frames. |
