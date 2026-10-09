@@ -375,6 +375,51 @@ stack:
 
 Then check the **Position** column in the Clients tab, which shows each client's fps. If a client still shows about 60, vsync or the graphics driver is capping it. If the fps is below 144 and fluctuates, your PC is the limit, because it has to draw every client at that rate. Lower in-game graphics settings help. Anything from 120 fps up gives facing under 1°.
 
+#### Who counts as "with you": the distance guard
+
+Your characters don't have to be together. Mirroring and stacking only act on followers who are **with the character you're steering** (for stacking, the one they stack onto). Everyone else is left alone.
+
+```yaml
+follow:
+  mirror_guard: true               # false = mirror to every follower, wherever they are
+  mirror_max_distance_yards: 40
+stack:
+  max_distance_yards: 40           # farther away, or in another zone: skipped
+```
+
+**How "with you" is decided**, each time you press a movement key (mirroring) or start a stack:
+
+1. **Same zone?** BoxBridge sends each client's map ID (`GetCurrentMapAreaID`), even in places without coordinates. A different map ID means *in another zone*, and that follower is left out. This check works from the moment WoWBox starts.
+2. **Close enough?** If both have coordinates, WoWBox works out the distance in yards. Map coordinates run 0–1 across each zone's map, and every zone's map is a different size, so WoWBox first needs that zone's **scale**. It gets it by measuring while stacking:
+   - Each move teaches it how far a character gets per second, in map units. Divided by the normal run speed (7 yd/s, `stack.run_speed`), that gives map units per yard.
+   - Only moves of at least 0.1 s count. On a shorter press, being one frame off is too big an error.
+   - Speeds are kept **per character and per zone**, so a mounted or slowed character doesn't throw off the others.
+   - **One bad reading is ignored.** A reading more than 2× off the current estimate is set aside. It only replaces the estimate if the next reading agrees, which is what happens when someone really mounts up or gets slowed. A blocked step, a stale reading, or your own mirrored keys reaching the character during a measurement can't spoil the scale.
+   - **The scale is trusted after two readings agree.** Until then, the guard only checks the zone, and stacking moves in short steps (at most 0.6 s).
+3. **Can't tell?** With no bridge data, an unknown map, or a zone not measured yet, the follower is treated as *with you*. The guard only leaves someone out when it knows they're elsewhere.
+
+The scale is re-measured after every WoWBox start: one or two stacks in a zone are enough. Until then, only "in another zone" can leave someone out.
+
+**What you'll see**
+- **Clients tab, Position column:** `[in another zone]` or `[85 yd away]` next to anyone who isn't with the leader.
+- **Log tab, mirroring:** a line when someone is left out, and one when they're back:
+  ```
+  mirroring: WoW2 Gnope left out (in another zone)
+  mirroring: WoW3 Kunth left out (52 yd away)
+  mirroring: WoW3 Kunth is with you again
+  ```
+- **Log tab, stacking:** stack results for followers elsewhere, skipped straight away rather than walked across the map:
+  ```
+  stack WoW2 Gnope: in another zone than the anchor (? yd off, ...)
+  stack WoW3 Kunth: too far away (52 yd, max 40 yd): use follow (...)
+  ```
+  Press **F10** (follow) to bring them over, then stack.
+
+**If someone standing next to you is left out**
+- **"in another zone":** the two clients report different map IDs. A client with its **world map open** reports the map it's showing, so close it. Moving between sub-zones and floors (e.g. dungeon levels) can also change the map ID.
+- **A distance far larger than real, e.g. "1840 yd away":** the zone scale is off. That shouldn't happen any more. If it does, restart WoWBox, which clears the measured speeds, and send the `stack …` lines from the log.
+- **To switch the guard off:** `follow.mirror_guard: false`, or raise `mirror_max_distance_yards` / `stack.max_distance_yards`. Then Reload config.
+
 ### Follow settings
 
 ```yaml
