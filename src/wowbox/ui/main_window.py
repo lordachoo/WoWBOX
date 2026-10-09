@@ -249,22 +249,29 @@ class MainWindow(QMainWindow):
         self.routes_table.verticalHeader().setVisible(False)
         buttons = QHBoxLayout()
         for text, fn in (("Add", self._route_add), ("Remove", self._route_remove), ("Up", lambda: self._route_move(-1)),
-                         ("Down", lambda: self._route_move(1)), ("Apply", self.apply_routes),
-                         ("Revert", self.load_routes)):
+                         ("Down", lambda: self._route_move(1)), ("Revert", self._route_revert)):
             buttons.addWidget(QPushButton(text, clicked=fn))
         buttons.addStretch(1)
-        hint = QLabel("First matching route wins. A chord matches exactly: list Shift+1 separately from 1. "
-                      "Keys not listed go only to the window you're in. Apply = live; Save config = write team.yaml.")
+        self.routes_table.itemChanged.connect(lambda _item: self.apply_routes())
+        self.routes_status = QLabel()
+        self.routes_status.setWordWrap(True)
+        hint = QLabel("Changes take effect as soon as you finish editing a cell. Save config writes them to "
+                      "team.yaml (only the routes part; the rest of the file and its comments stay). "
+                      "First matching route wins. A chord matches exactly: list Shift+1 separately from 1. Keys "
+                      "not listed go only to the window you're in. To: all, active (only the window you're in), "
+                      "followers, leader, none (nobody, the key is blocked), or slots like 1,3.")
         hint.setWordWrap(True)
         w = QWidget()
         lay = QVBoxLayout(w)
         lay.addWidget(self.routes_table)
         lay.addLayout(buttons)
+        lay.addWidget(self.routes_status)
         lay.addWidget(hint)
         return w
 
     def load_routes(self) -> None:
         t = self.routes_table
+        t.blockSignals(True)
         t.setRowCount(0)
         for r in self.c.cfg.routes:
             row = t.rowCount()
@@ -272,18 +279,27 @@ class MainWindow(QMainWindow):
             to = r.to if isinstance(r.to, str) else ",".join(map(str, r.to))
             for col, text in enumerate((", ".join(r.keys), to, r.note)):
                 t.setItem(row, col, _item(text, editable=True))
+        t.blockSignals(False)
+        if hasattr(self, "routes_status"):
+            self.routes_status.setText("")
+
+    def _route_revert(self) -> None:
+        self.load_routes()
 
     def _route_add(self) -> None:
         row = self.routes_table.rowCount()
+        self.routes_table.blockSignals(True)
         self.routes_table.insertRow(row)
         for col, text in enumerate(("", "all", "")):
             self.routes_table.setItem(row, col, _item(text, editable=True))
+        self.routes_table.blockSignals(False)
         self.routes_table.editItem(self.routes_table.item(row, 0))
 
     def _route_remove(self) -> None:
         rows = sorted({i.row() for i in self.routes_table.selectedIndexes()}, reverse=True)
         for r in rows:
             self.routes_table.removeRow(r)
+        self.apply_routes()
 
     def _route_move(self, delta: int) -> None:
         t = self.routes_table
@@ -291,29 +307,48 @@ class MainWindow(QMainWindow):
         if r < 0 or not 0 <= r + delta < t.rowCount():
             return
         texts = [[t.item(row, c).text() if t.item(row, c) else "" for c in range(3)] for row in (r, r + delta)]
+        t.blockSignals(True)
         for row, vals in zip((r + delta, r), texts):
             for c, text in enumerate(vals):
                 t.setItem(row, c, _item(text, editable=True))
+        t.blockSignals(False)
         t.setCurrentCell(r + delta, 0)
+        self.apply_routes()
 
     def apply_routes(self) -> None:
+        """Use the table's routes now, if every row is valid; otherwise mark the bad row and keep the old ones."""
         t = self.routes_table
         routes = []
-        try:
-            for row in range(t.rowCount()):
-                keys_text, to_text, note = (t.item(row, c).text().strip() if t.item(row, c) else "" for c in range(3))
-                if not keys_text:
-                    continue
+        bad = None
+        for row in range(t.rowCount()):
+            keys_text, to_text, note = (t.item(row, c).text().strip() if t.item(row, c) else "" for c in range(3))
+            if not keys_text:
+                continue  # an empty row (just added): ignored until it has keys
+            try:
                 keys = [k.strip() for k in keys_text.split(",") if k.strip()]
                 for k in keys:
                     expand_key_spec(k)
                 to_text = to_text or "active"
                 to = [int(x) for x in to_text.replace(" ", "").split(",")] if to_text[0].isdigit() else to_text
                 routes.append(RouteConfig(keys=keys, to=to, note=note))
-        except Exception as e:
-            QMessageBox.warning(self, "Invalid route", f"Row {row + 1}: {e}")
+            except Exception as e:
+                bad = (row, str(e).splitlines()[-1] if str(e) else type(e).__name__)
+                break
+        t.blockSignals(True)
+        for row in range(t.rowCount()):
+            for c in range(3):
+                if it := t.item(row, c):
+                    it.setBackground(QColor("#ffcdd2") if bad and row == bad[0] else QColor(0, 0, 0, 0))
+        t.blockSignals(False)
+        if bad:
+            self.routes_status.setText(f"<span style='color:#c62828'>Row {bad[0] + 1}: {bad[1]}. "
+                                       f"Not applied: the previous routes are still in use.</span>")
+            return
+        if [r.model_dump() for r in routes] == [r.model_dump() for r in self.c.cfg.routes]:
             return
         self.c.set_routes(routes)
+        self.routes_status.setText(f"Applied: {len(routes)} route(s) in use now. Save config to keep them "
+                                   f"after a restart.")
 
     # ------------------------------------------------------------------ macros
     def _build_macros_tab(self) -> QWidget:

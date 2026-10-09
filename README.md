@@ -172,12 +172,15 @@ On start, WoWBox attaches to every running `Wow.exe` window. It puts each window
 
 **Second row:** Launch missing, Attach running, Arrange, the Layout and Leader pickers, Restore frames (puts window borders back), Reload config, Save config.
 
+- **Reload config** re-reads `team.yaml` (and `macros.yaml`) after you've edited them by hand.
+- **Save config** writes what you changed *in the app* (the route table, the leader and the slots' characters) into `team.yaml`, **in place**. Only those lines change. The rest of the file, comments included, stays as you wrote it. If nothing changed, nothing is written. The previous version is kept as `team.yaml.bak`.
+
 **Tabs:**
 
 | Tab | Shows |
 |---|---|
 | **Clients** | One row per slot: character and class, label, role, PID, window, status, Broadcast checkbox (untick to leave a client out of broadcasts), HP, power, target, state flags (`combat casting TYPING following …`), and bridge health. Buttons: **Move up/down** swaps slots, **Remember characters** pins the current characters into `team.yaml`. |
-| **Routes** | The route table, editable live. Save config writes it back. |
+| **Routes** | The route table. A change takes effect as soon as you finish editing a cell. A bad row turns red and isn't used. **Save config** keeps the changes after a restart. |
 | **Macros** | Your macros with their hotkeys, whether they're running, and their steps. **New / Edit / Duplicate / Delete** open the macro editor (double-click edits too). Run/Stop, Stop all. |
 | **Automation** | Rules, their triggers and actions, enable checkboxes, and how often each has fired. |
 | **Log** | Everything WoWBox does: keys typed, rules fired, chat lines seen, `/bb` commands. The same goes to `logs\wowbox.log`. |
@@ -240,6 +243,10 @@ Routes, macros, automation, `/bb to` and follow settings all use the same target
 Names and classes come from the bridge. Until a client's bridge has reported, a name target can't find it.
 
 ## 9. Key broadcasting and routes
+
+**Changing a route.** In the **Routes** tab, edit a cell and press Enter. It takes effect at once (the line under the table says *Applied*). Click **Save config** to keep it after a restart. You can also edit `routes:` in `team.yaml` and press **Reload config**.
+
+**Turning a key's broadcasting off.** Set its *To* to **`active`**, so the key only goes to the window you're in, or remove the route. Don't use `none` for this: `none` means *nobody* gets the key, not even the window you're in, so the key stops working altogether. ScrollLock switches all broadcasting off at once.
 
 ```yaml
 routes:
@@ -720,7 +727,7 @@ Everything lives in `config\team.yaml`. The exe uses `config\team.yaml` next to 
 - **Durations** look like `500ms`, `1.5s`, `20s`, `25m` or `1h`.
 - **Validate** with `--check-config`.
 - **Reload config** re-reads routes, hotkeys, macros, team, follow and automation. Other sections need a restart.
-- **Save config** writes the file back. The previous version is kept as `.bak`, but YAML comments are lost.
+- **Save config** updates the route table, the leader and the slots' `character:` names in `team.yaml` in place. Every other line, comments included, is left alone. The previous version is kept as `.bak`, and nothing is written when nothing changed.
 
 | Section | Key options |
 |---|---|

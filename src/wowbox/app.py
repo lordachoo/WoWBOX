@@ -18,7 +18,8 @@ from .macro_store import macros_path, migrate, save_macros
 from .follow import FollowManager
 from .stack import Stacker, StackManager, StackResult, apart
 from .bridge import BridgePoller, ChatEvent, ClientState
-from .config import AppConfig, RouteConfig, load_config, save_config
+from .config import AppConfig, RouteConfig, load_config
+from .config_text import update_team_yaml
 from .keys import parse_chord
 from .launcher import Launcher
 from .layout import LayoutManager
@@ -209,8 +210,17 @@ class Controller(QObject):
             self._overlay_timer.stop()
 
     def save_config(self) -> None:
-        save_config(self.cfg, self.cfg_path)
-        log.info("config saved to %s (previous version kept as .bak)", self.cfg_path)
+        """Write the route table, leader and slot characters into team.yaml, in place: the rest of the file,
+        comments included, stays as you wrote it."""
+        try:
+            changed = update_team_yaml(self.cfg_path, self.cfg)
+        except Exception as e:
+            log.error("config not saved: %s", e)
+            return
+        if changed:
+            log.info("saved %s to %s (previous version kept as .bak)", ", ".join(changed), self.cfg_path.name)
+        else:
+            log.info("nothing to save: %s already matches", self.cfg_path.name)
 
     def reload_config(self) -> None:
         try:
