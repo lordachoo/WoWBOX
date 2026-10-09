@@ -412,6 +412,57 @@ Every step except `wait`, `sequence` and `macro` takes `to:` (default `all`).
 - **Editing.** Edit `team.yaml`, then press **Reload config**.
 - **Tip.** For something you press constantly, an in-game macro bound to a key plus a route (`keys: ["F6"], to: Gnope`) is faster than typing into chat.
 
+### Using items and casting spells
+
+A `type:` step types any chat line into the chosen characters' chat. WoW handles it exactly as if you typed it, so `/use` and `/cast` work, protected spells included.
+
+```yaml
+macros:
+  - name: portal-stone                      # every character uses the same item
+    key: "Ctrl+Alt+P"
+    do: { type: "/use Portal Stone of Learning", to: all }
+
+  - name: heal-and-bolt                     # different characters, different spells
+    key: "Ctrl+Alt+H"
+    do:
+      sequence:
+        - { type: "/cast [@Tinkerdawn] Healing Wave", to: Kunth }   # heal the tank, target unchanged
+        - { type: "/assist Tinkerdawn", to: Gnope }
+        - { type: "/cast Shadow Bolt", to: Gnope }
+
+  - name: buff-round                        # several spells on one character: mind the global cooldown
+    key: "Ctrl+Alt+B"
+    do:
+      sequence:
+        - { type: "/cast [@Tinkerdawn] Water Shield", to: Kunth }
+        - { wait: 1.6s }
+        - { type: "/cast [@Gnope] Water Breathing", to: Kunth }
+```
+
+Useful chat commands:
+
+| Line | Does |
+|---|---|
+| `/use Portal Stone of Learning` | use an item by name |
+| `/use item:12345` | use an item by ID (short enough for `/bb`) |
+| `/use 0 1` | use whatever is in backpack slot 1 |
+| `/cast Shadow Bolt` | cast on your current target |
+| `/cast Healing Wave(Rank 3)` | a specific rank |
+| `/cast [@Tinkerdawn] Healing Wave` | cast on a named character without changing target (`[target=Tinkerdawn]` also works) |
+| `/cast [@focus] Fear` | cast on your focus |
+| `/castsequence Corruption, Curse of Agony, Shadow Bolt` | the next spell in the list each time it runs |
+| `/stopcasting` | interrupt your own cast |
+
+- **Global cooldown.** Two casts on the same character need about 1.5 s between them (`wait:`), or the second fails with "Spell is not ready yet".
+- **Names must match the game's exactly,** including the server's custom spell and item names. Case doesn't matter.
+- **The same lines work as team commands,** within 27 characters: `/bb all use item:12345`, `/bb to Gnope cast Shadow Bolt`, `/bb to class:SHAMAN cast Ghost Wolf`.
+- **Typed lines or keys?** Typing a line takes about 0.2 s. Use typed lines for situational things: portals, mounts, buff rounds, a heal on a whisper. For your fighting rotation, use action bar keys with broadcasting, which is instant.
+
+**To find an item's ID**, run this in any client and replace the name:
+```
+/run print((select(2, GetItemInfo("Portal Stone of Learning")) or "not in your bags/cache"):match("item:(%d+)") or "?")
+```
+
 ## 13. Automation
 
 Rules that act without a keypress. Automation always starts **OFF** and in **dry run**: dry run logs what it would send and sends nothing. Turn it on with the button, untick Dry run when you trust it, and kill it with Ctrl+Alt+K.
