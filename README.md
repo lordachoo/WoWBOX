@@ -626,7 +626,9 @@ In the **Automation** tab, use **New**, **Edit** (or double-click a rule), **Dup
     - **Who:** `any` fires if one of them matches, `all` only if every one does. Or pick a character or slots, e.g. `3 (Kunth)` or `[2, 3]`.
     - **Conditions:** rows of *Field* (health %, power %, in combat, casting, mounted, on /follow, has a target…), *Is* (`=`, `≠`, `<`, `≤`, `>`, `≥`) and *Value*. Yes/no fields only offer `=`/`≠` and *yes*/*no*. All rows must hold.
   - **Timer:** every `25m`, `90s`, `1h`…
-  - **Chat:** a chat line comes in. Pick the channels, *From* (names, or empty for anyone), *Containing* (words, or empty for any line) and *Heard by*.
+  - **Chat:** a chat line comes in. Pick the channels, *From*, *Containing* (words, or empty for any line) and *Heard by*.
+    - **From** takes character names (any case), `team` for any of your own characters, or both, e.g. `team, Randomfriend`. Empty means anyone, strangers included.
+    - `all`, `any`, `anyone` and `*` are refused with an explanation. *From* doesn't take the *To* keywords: a keyword there would be read as a name, and the rule would never fire.
   - **Chat + state:** a chat line, but only if a condition is true too, e.g. "only if Kunth isn't casting".
 - **Then do:** the same step table as the macro editor (*Type chat line*, *Press key*, *Press keys*, *Wait*, *Start macro*, with *To* and *Then wait*). In chat rules, `{sender}`, `{message}`, `{channel}` and `{listener}` are filled in.
 - **Live check:** updates twice a second while you edit. It shows in plain words whether the rule would fire *right now*, using the characters' live state, and if not, why not. For example: `Condition is false now: Kunth: no (power_pct is 62, needs < 40)`. For chat rules it spells out what it listens for and on whose client. It also says whether automation is off, in dry run, or live.
@@ -666,7 +668,7 @@ BoxBridge passes every whisper, party, raid, guild, officer, say and yell line i
   - name: kunth-heals-on-whisper
     chat:
       channel: whisper              # or [party, raid], or any. Default: whisper
-      sender: [Tinkerdawn, Gnope]   # only these (any case). Leave out = anyone
+      sender: [Tinkerdawn, Gnope]   # only these (any case); team = any of your characters. Leave out = anyone
       contains: [heal, help]        # any of these words (any case). Leave out = any line
       heard_by: Kunth               # which of your clients must receive it. Default: all
     when: { slot: 3, casting: false }   # optional extra state check
@@ -747,6 +749,16 @@ automation:
 ```
 
 **How it fits together**
+- **Who may trigger it (`sender:` / *From*):**
+
+  | You write | Fires for |
+  |---|---|
+  | `[Tinkerdawn, Gnope]` | those characters only (any case) |
+  | `team` | any of **your own** characters: the ones logged in, plus those pinned to slots in `team.yaml` |
+  | `[team, Randomfriend]` | your characters and Randomfriend |
+  | *(empty / left out)* | **anyone**, strangers included |
+  | `all`, `any`, `anyone`, `*` | refused, with a hint to leave it empty instead |
+
 - **`chat:`** decides *which line* fires the rule:
   - `channel` is where it was said;
   - `sender` is who may trigger it;
@@ -770,7 +782,7 @@ automation:
 4. When the log looks right, untick **Dry run**. Ctrl+Alt+K turns all automation off at once.
 
 **Watch out**
-- **Strangers.** A rule without `sender:` reacts to *anyone* who whispers the keyword. That's what a public buff bot does, but keep `cooldown` up and stay out of combat (`when: {combat: false}`).
+- **Strangers.** A rule without `sender:` reacts to *anyone* who whispers the keyword. For "only my own characters", use `sender: team`. That's what a public buff bot does, but keep `cooldown` up and stay out of combat (`when: {combat: false}`).
 - **Server rules.** Many servers forbid unattended bots. A buff bot that answers strangers while you're away is exactly what they look for. Check your server's rules first.
 - **Range and line of sight.** WoW's own rules still apply. Out of range shows the usual error on that client, and the rule doesn't retry.
 - **Text length.** Only the first 27 characters of a whisper reach WoWBox, so keywords should come early in the message.

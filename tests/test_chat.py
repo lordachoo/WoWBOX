@@ -218,3 +218,26 @@ def test_config_rejects_bad_triggers():
         AppConfig.model_validate({"automation": [{"name": "x", "chat": {"channel": "tells"}, "do": {"send": "1"}}]})
     cfg = AppConfig.model_validate({"automation": [{"name": "x", "chat": {"sender": "Bob"}, "do": {"send": "1"}}]})
     assert cfg.automation[0].chat.sender == ["Bob"] and cfg.automation[0].chat.channel == ["whisper"]
+
+
+@pytest.mark.parametrize("word", ["all", "All", "anyone", "*", "everyone"])
+def test_from_rejects_target_words(word):
+    with pytest.raises(ValueError, match="Leave From empty to accept anyone"):
+        AppConfig.model_validate({"automation": [{"name": "x", "chat": {"sender": [word]}, "do": {"send": "1"}}]})
+
+
+def test_from_team_means_your_own_characters():
+    class TeamSource(Source):
+        def character_names(self):
+            return {"Tinkerdawn", "Gnope", "Kunth"}
+
+    rule = {"name": "team-heal", "chat": {"sender": ["team", "Randomfriend"], "contains": "heal", "heard_by": "Kunth"},
+            "do": {"type": "/cast [@{sender}] Healing Wave", "to": "Kunth"}}
+    cfg = AppConfig.model_validate({"automation": [rule], "automation_options": {
+        "enabled_on_start": True, "dry_run": False, "pause_on_stale_bridge": False}})
+    sender, src = Sender(), TeamSource()
+    e = AutomationEngine(cfg.automation, cfg.automation_options, sender, src)
+    e.on_chat(3, whisper(sender="gnope", text="heal pls"), now=0)          # one of yours, any case
+    e.on_chat(3, whisper(sender="Randomfriend", text="heal pls"), now=10)  # named
+    e.on_chat(3, whisper(sender="Randompug", text="heal pls"), now=20)     # a stranger
+    assert [t for k, t, _ in sender.sent] == ["/cast [@gnope] Healing Wave", "/cast [@Randomfriend] Healing Wave"]

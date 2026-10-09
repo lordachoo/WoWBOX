@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Protocol
 
 from ..bridge.decoder import STATE_FIELDS, ChatEvent, ClientState
-from ..config import AutomationOptions, AutomationRule, ChatTrigger, Condition, Target
+from ..config import SENDER_TEAM, AutomationOptions, AutomationRule, ChatTrigger, Condition, Target
 from ..keys import Chord
 from .actions import MacroStep, SendStep, Step, TypeStep, WaitStep, describe, flatten, substitute
 
@@ -229,10 +229,21 @@ class AutomationEngine:
             self._fire(rt, now, substitute(rt.steps, values),
                        f"{ev.channel} from {ev.sender}: {ev.text!r}")
 
+    def _sender_ok(self, allowed: list[str], sender: str) -> bool:
+        names = {n.lower() for n in allowed}
+        if SENDER_TEAM in names and sender.lower() in self._team_names():
+            return True
+        return sender.lower() in names - {SENDER_TEAM}
+
+    def _team_names(self) -> set[str]:
+        """Your own characters' names (lower case), for `sender: team`."""
+        fn = getattr(self.source, "character_names", None)
+        return {n.lower() for n in fn()} if fn else set()
+
     def _chat_matches(self, trig: ChatTrigger, slot: int, ev: ChatEvent) -> bool:
         if "any" not in trig.channel and ev.channel not in trig.channel:
             return False
-        if trig.sender and ev.sender.lower() not in {n.lower() for n in trig.sender}:
+        if trig.sender and not self._sender_ok(trig.sender, ev.sender):
             return False
         if trig.contains and not any(w.lower() in ev.text.lower() for w in trig.contains):
             return False

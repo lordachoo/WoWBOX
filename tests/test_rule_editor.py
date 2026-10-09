@@ -202,3 +202,12 @@ def test_text_fields_and_unknown_fields(qapp):
     dlg, _ = editor(qapp, rule)
     assert key(dlg.build()) == key(rule)
     assert yaml.safe_load(dump_rules([rule]))["automation"][0]["when"]["slot"] == "all"
+
+
+def test_editor_from_all_explains_itself(qapp):
+    dlg, _ = editor(qapp, rules()[2])
+    dlg.senders.setText("all")
+    with pytest.raises(ValueError, match="Leave From empty"):
+        dlg.build()
+    dlg.senders.setText("team, Randomfriend")
+    assert dlg.build().chat.sender == ["team", "Randomfriend"]

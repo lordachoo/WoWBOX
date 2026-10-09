@@ -303,7 +303,8 @@ class RuleEditor(QDialog):
             ch_row.addWidget(cb)
         ch_row.addStretch(1)
         self.senders = QLineEdit(", ".join(chat.sender) if chat and chat.sender else "")
-        self.senders.setPlaceholderText("character names, comma separated; empty = anyone (careful)")
+        self.senders.setPlaceholderText("names, comma separated; team = any of your own characters; "
+                                        "empty = anyone (careful)")
         self.contains = QLineEdit(", ".join(chat.contains) if chat and chat.contains else "")
         self.contains.setPlaceholderText("words, comma separated (any one of them, any case); empty = any line")
         self.heard_by = QComboBox()

@@ -391,7 +391,12 @@ class Controller(QObject):
         if rule.chat is not None:
             ch = rule.chat
             heard = [names.get(s, str(s)) for s in self.team.resolve(ch.heard_by, self.router.active_slot())]
-            src = f"from {', '.join(ch.sender)}" if ch.sender else "from <b>anyone</b>"
+            if ch.sender:
+                named = [n for n in ch.sender if n.lower() != "team"]
+                parts = [] if len(named) == len(ch.sender) else                     [f"your characters ({', '.join(sorted(self.character_names())) or 'none known yet'})"]
+                src = "from " + ", ".join(parts + named)
+            else:
+                src = "from <b>anyone</b>"
             words = f" containing {' or '.join(repr(w) for w in ch.contains)}" if ch.contains else ""
             lines.append(f"Fires on a {'/'.join(ch.channel)} line {src}{words}, heard by "
                          f"{', '.join(heard) if heard else '<b>nobody</b> (check Heard by)'}.")
@@ -423,7 +428,12 @@ class Controller(QObject):
         steps = flatten(rule.do)
         if rule.chat is not None:
             ch = rule.chat
-            sample = {"sender": (ch.sender or ["Someone"])[0], "message": (ch.contains or ["hello"])[0],
+            first = (ch.sender or ["Someone"])[0]
+            if first.lower() == "team":
+                slot_cfg = self.cfg.team.slots.get(self.team.leader)
+                first = (self.team.clients[self.team.leader].character or (slot_cfg and slot_cfg.character)
+                         or next(iter(sorted(self.character_names())), "Yourleader"))
+            sample = {"sender": first, "message": (ch.contains or ["hello"])[0],
                       "channel": ch.channel[0], "listener": self.team.clients[self.team.leader].name}
             steps = substitute(steps, sample)
             intro = f"Test: a {sample['channel']} from {sample['sender']} saying {sample['message']!r} would do:"
@@ -600,6 +610,11 @@ class Controller(QObject):
 
     def missing_windows(self) -> list[int]:
         return sorted(self._lost)
+
+    def character_names(self) -> set[str]:
+        """Your own characters: the ones logged in now, plus those pinned to slots (for chat `sender: team`)."""
+        names = {c.character for c in self.team.clients.values() if c.character}
+        return names | {s.character for s in self.cfg.team.slots.values() if s.character}
 
     def slots_for(self, target) -> list[int]:
         return self.team.resolve(target, self.router.active_slot())

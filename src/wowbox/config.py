@@ -202,12 +202,26 @@ def _as_list(v: Any) -> Any:
     return [v] if isinstance(v, str) else v
 
 
+SENDER_TEAM = "team"  # in `sender`: any of your own characters
+NOT_A_SENDER = {"all", "any", "anyone", "everyone", "everybody", "*"}
+
+
 class ChatTrigger(_Model):
     """Fires when a client's BoxBridge reports a chat line that matches."""
     channel: Annotated[list[ChatChannel | Literal["any"]], BeforeValidator(_as_list)] = ["whisper"]
-    sender: Annotated[list[str] | None, BeforeValidator(_as_list)] = None  # character names, any case
+    # character names (any case) and/or "team" (any of your own characters); None = anyone
+    sender: Annotated[list[str] | None, BeforeValidator(_as_list)] = None
     contains: Annotated[list[str] | None, BeforeValidator(_as_list)] = None  # any of these words, any case
     heard_by: Target = "all"  # which of your clients must have received it
+
+    @field_validator("sender")
+    @classmethod
+    def _sender_names(cls, v: list[str] | None) -> list[str] | None:
+        for name in v or []:
+            if name.strip().lower() in NOT_A_SENDER:
+                raise ValueError(f"From: {name!r} isn't a character name. Leave From empty to accept anyone, "
+                                 f"or use {SENDER_TEAM} for your own characters")
+        return v
 
 
 class AutomationRule(_Model):
