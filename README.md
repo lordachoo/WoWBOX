@@ -554,6 +554,91 @@ BoxBridge passes every whisper, party, raid, guild, officer, say and yell line i
 - **Limits.** The first 27 bytes of each line come through, which is plenty for keywords. Senders get 20 bytes. The addon shows each line for 0.5 s, so a burst of 10 lines takes about 5 s, and status updates pause meanwhile.
 - **Testing.** `/bb test Tinkerdawn heal me` in Kunth's client acts like a whisper from Tinkerdawn.
 
+### Recipe: heal and buff bot on whisper
+
+A complete example to copy into `team.yaml` under `automation:`. Kunth (shaman) heals and buffs whoever whispers him with a keyword, and replies so they know it worked. Gnope (warlock) answers too. Change the names, spells and keywords to your own.
+
+```yaml
+automation:
+  # "heal" from a group member: heal them without changing Kunth's target
+  - name: heal-on-whisper
+    chat:
+      channel: [whisper, party]
+      sender: [Tinkerdawn, Gnope]          # only these may trigger it; leave out = anyone (careful)
+      contains: [heal]
+      heard_by: Kunth
+    when: { slot: 3, casting: false, dead: false, ghost: false }
+    do:
+      sequence:
+        - { type: "/cast [@{sender}] Healing Wave", to: Kunth }
+        - { type: "/w {sender} Healing you!", to: Kunth }
+    cooldown: 3s
+
+  # "chain": a different spell for a different word
+  - name: chain-heal-on-whisper
+    chat: { channel: [whisper, party], sender: [Tinkerdawn, Gnope], contains: [chain], heard_by: Kunth }
+    when: { slot: 3, casting: false, dead: false }
+    do: { type: "/cast [@{sender}] Chain Heal", to: Kunth }
+    cooldown: 5s
+
+  # "buffs": a buff round on the whisperer. One character can only cast once per global cooldown,
+  # so its spells need ~1.6 s between them; different characters can cast at the same time.
+  - name: buff-bot
+    chat:
+      channel: whisper
+      contains: [buffs, buff me]          # no sender list: anyone may ask (see the warning below)
+      heard_by: Kunth
+    when: { slot: 3, combat: false, casting: false, dead: false }   # only out of combat
+    do:
+      sequence:
+        - { type: "/w {sender} Buffing you, stand still a few seconds", to: Kunth }
+        - { type: "/target {sender}", to: Kunth }        # /target also works on people outside your group
+        - { type: "/cast Water Breathing", to: Kunth }
+        - { type: "/target {sender}", to: Gnope }
+        - { type: "/cast Unending Breath", to: Gnope }   # Gnope casts at the same time as Kunth
+        - { wait: 1.6s }
+        - { type: "/cast Water Walking", to: Kunth }
+        - { wait: 1.6s }
+        - { type: "/targetlasttarget", to: [2, 3] }       # back to what they had targeted
+    cooldown: 20s                           # one buff round at a time
+
+  # "inv": invite whoever asks (a buff-bot staple)
+  - name: invite-on-whisper
+    chat: { channel: whisper, contains: [inv], heard_by: Tinkerdawn }
+    do: { type: "/invite {sender}", to: Tinkerdawn }
+    cooldown: 5s
+```
+
+**How it fits together**
+- **`chat:`** decides *which line* fires the rule:
+  - `channel` is where it was said;
+  - `sender` is who may trigger it;
+  - `contains` is the keywords;
+  - `heard_by` is the client that received it.
+- **`when:`** adds a condition on that character's current state, e.g. not casting, not dead, out of combat. Any bridge field from the list above can go here.
+- **`do:`** is the same step list as a macro. `{sender}` is filled in with the whisperer's name.
+- **`[@{sender}]`** casts on the whisperer without changing your target. It works for party and raid members. For anyone else, use `/target {sender}` + `/cast …` + `/targetlasttarget`, as in `buff-bot`.
+- **`cooldown:`** stops one person from spamming the rule. A rule that's still running its steps also won't start again.
+- **Every matching rule fires.** Keywords match anywhere in the text, so `heal` also matches "bigheal" or "chain heal". Pick keywords that don't contain each other (here `heal` and `chain`), and remember that a whisper containing both words fires both rules.
+
+**Turning it on and testing**
+1. Paste the rules under `automation:` in `team.yaml`, save, and press **Reload config**. They show up in the **Automation** tab.
+2. Click **Automation: ON**. Leave **Dry run** ticked at first.
+3. In Kunth's client, fake a whisper:
+   ```
+   /bb test Tinkerdawn heal me
+   /bb test Randompug buffs
+   ```
+   The Log tab shows `rule 'heal-on-whisper' fired (whisper from Tinkerdawn: 'heal me')`, then `[dry run] would type '/cast [@Tinkerdawn] Healing Wave' -> Kunth`.
+4. When the log looks right, untick **Dry run**. Ctrl+Alt+K turns all automation off at once.
+
+**Watch out**
+- **Strangers.** A rule without `sender:` reacts to *anyone* who whispers the keyword. That's what a public buff bot does, but keep `cooldown` up and stay out of combat (`when: {combat: false}`).
+- **Server rules.** Many servers forbid unattended bots. A buff bot that answers strangers while you're away is exactly what they look for. Check your server's rules first.
+- **Range and line of sight.** WoW's own rules still apply. Out of range shows the usual error on that client, and the rule doesn't retry.
+- **Text length.** Only the first 27 characters of a whisper reach WoWBox, so keywords should come early in the message.
+- **Exact names.** Spell names must match the game's exactly, including your server's custom spells.
+
 ### Common to all rules
 
 - `cooldown:` is the minimum time between firings.
