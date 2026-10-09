@@ -16,7 +16,7 @@ from .config import MacroConfig
 from .keys import parse_chord
 from .macro_store import macros_path, migrate, save_macros
 from .follow import FollowManager
-from .stack import Stacker, StackManager, StackResult
+from .stack import Stacker, StackManager, StackResult, apart
 from .bridge import BridgePoller, ChatEvent, ClientState
 from .config import AppConfig, RouteConfig, load_config, save_config
 from .keys import parse_chord
@@ -93,6 +93,8 @@ class Controller(QObject):
         self.memread = MemReadPoller(cfg.memread, self._pids, self._on_mem_values)
         self.stacker = Stacker(cfg.stack, self._client_state, self._post_raw)
         self.commands = TeamCommands(self.router, self._client_state)
+        self.router.mirror_allowed = self._mirror_allowed
+        self.apart: dict[int, str | None] = {}  # slot -> why it was left out of mirroring last time
         self.stack = StackManager(cfg.stack, self.stacker, lambda anchor: self.team.resolve(self.cfg.stack.who, anchor),
                                   on_done=self.sig_stack_done.emit, boost=self.bridge.boost,
                                   moving_since=lambda: self.router.last_movement)
@@ -339,6 +341,27 @@ class Controller(QObject):
     def _post_raw(self, slot: int, vk: int, down: bool) -> None:  # stack threads: plain key, no modifiers
         if hwnd := self.team.hwnd(slot):
             self.input.post_key(hwnd, vk, down)
+
+    def where_apart(self, slot: int, leader: int | None) -> str | None:
+        """Why `slot` isn't with `leader` ("in another zone", "85 yd away"), or None."""
+        if leader is None or slot == leader:
+            return None
+        lead = self._client_state(leader)
+        return apart(self._client_state(slot), lead, self.cfg.follow.mirror_max_distance_yards,
+                     self.stacker.units_per_yard(lead) if lead else None, self.cfg.stack.map_aspect)
+
+    def _mirror_allowed(self, leader: int | None, slot: int) -> bool:  # keyboard hook thread: keep it quick
+        if not self.cfg.follow.mirror_guard:
+            return True
+        why = self.where_apart(slot, leader)
+        if why != self.apart.get(slot):
+            self.apart[slot] = why
+            name = self.team.clients[slot].name
+            if why:
+                log.info("mirroring: %s left out (%s)", name, why)
+            else:
+                log.info("mirroring: %s is with you again", name)
+        return why is None
 
     def _apply_stack_cfg(self) -> None:
         self.follow.stack_on_stop = self.stack.stack_on if self.cfg.stack.on_stop else None

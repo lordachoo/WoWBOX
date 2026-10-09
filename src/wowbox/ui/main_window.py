@@ -197,8 +197,9 @@ class MainWindow(QMainWindow):
                             + (" dead" if st.target_dead else "")) if st and st.target_exists and not st.stale
                            else ""),
                 "State": self._flags(st),
-                "Position": (f"{st.map_x * 100:.2f}, {st.map_y * 100:.2f}  {math.degrees(st.facing):.0f}°  {st.fps} fps"
-                             if st and st.position_ok and not st.stale else ""),
+                "Position": ((f"{st.map_x * 100:.2f}, {st.map_y * 100:.2f}  {math.degrees(st.facing):.0f}°  "
+                              f"{st.fps} fps" if st and st.position_ok and not st.stale else "")
+                             + (f"  [{away}]" if (away := self.c.where_apart(c.slot, self.c.team.leader)) else "")),
                 "Bridge": self._bridge_text(c.slot),
             }
             for col, text in values.items():

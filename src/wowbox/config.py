@@ -265,6 +265,8 @@ class FollowConfig(_Model):
     retry_max: Duration = 15.0
     stop_key: ChordStr | None = "S"  # `stay` taps this on followers (any movement breaks /follow)
     mirror_on_start: bool = False
+    mirror_guard: bool = True  # only mirror to followers in your zone and within mirror_max_distance_yards
+    mirror_max_distance_yards: float = 40.0
     movement_keys: list[str] = ["W", "A", "S", "D", "Q", "E", "Space"]  # copied to followers while mirroring
 
     @field_validator("movement_keys")
@@ -283,6 +285,7 @@ class StackConfig(_Model):
     tolerance_yards: float = 0.1
     facing_tolerance_deg: float = 1.0  # below half a frame of turning isn't possible: raise the fps
     timeout: Duration = 10.0  # give up on a follower after this long
+    max_distance_yards: float = 40.0  # farther than this (or another zone): skip it, don't walk there
     run_speed: float = 7.0  # yards/s, to turn the measured speed into yards (unmounted run)
     turn_rate_deg: float = 180.0  # first guess for keyboard turning; measured as it goes
     map_aspect: float = 1.5  # zone map width/height in yards per map unit (WoW zone maps are 3:2)

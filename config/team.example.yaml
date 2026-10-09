@@ -64,6 +64,8 @@ follow:
   stop_key: "S"                 # `stay` taps this on followers (any movement breaks /follow)
   movement_keys: ["W", "A", "S", "D", "Q", "E", "Space"]   # copied to followers while mirroring
   mirror_on_start: false
+  mirror_guard: true            # don't mirror to followers in another zone or too far from you
+  mirror_max_distance_yards: 40
 
 stack:                          # F12 / Stack button / "/bb stack": walk followers onto one character's spot and facing
   who: all                      # who gets stacked (the character they stack on is left out)
@@ -72,6 +74,7 @@ stack:                          # F12 / Stack button / "/bb stack": walk followe
   tolerance_yards: 0.1
   facing_tolerance_deg: 1       # can't beat half a frame of turning: 1.5 deg at 60 fps, 0.75 at 120
   timeout: 10s
+  max_distance_yards: 40        # farther (or another zone): skip that follower, use follow instead
   run_speed: 7.0                # yards/s unmounted; turns measured speed into yards
   map_aspect: 1.5               # zone maps are 3:2
   # movement keys it uses (WoW defaults): forward W, back S, strafe_left Q, strafe_right E, turn_left A, turn_right D

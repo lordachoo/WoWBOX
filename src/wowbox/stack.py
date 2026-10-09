@@ -69,6 +69,21 @@ def right_vector(facing: float) -> tuple[float, float]:
     return math.cos(facing), -math.sin(facing)
 
 
+def apart(me: ClientState | None, leader: ClientState | None, max_yards: float,
+          units_per_yard: float | None, aspect: float = 1.5) -> str | None:
+    """Why `me` isn't with `leader`: "in another zone" or "85 yd away". None when they're together, or when
+    there's no way to tell (no bridge data, unknown map, or the zone's scale isn't measured yet)."""
+    if me is None or leader is None or me.stale or leader.stale:
+        return None
+    if me.map_id and leader.map_id and (me.map_id, me.map_level) != (leader.map_id, leader.map_level):
+        return "in another zone"
+    if me.position_ok and leader.position_ok and units_per_yard and me.map_id == leader.map_id:
+        yards = math.hypot((me.map_x - leader.map_x) * aspect, me.map_y - leader.map_y) / units_per_yard
+        if yards > max_yards:
+            return f"{yards:.0f} yd away"
+    return None
+
+
 @dataclass
 class StackResult:
     slot: int
@@ -177,6 +192,13 @@ class Stacker:
         fwd = self._speed(st, "forward")
         return fwd / self.cfg.run_speed if fwd else None
 
+    def _too_far(self, me: ClientState, anchor: ClientState) -> str | None:
+        upy = self.units_per_yard(me)
+        if upy is None:
+            return None
+        yards = math.hypot(*self._offset(me, anchor)) / upy
+        return f"{yards:.0f} yd" if yards > self.cfg.max_distance_yards else None
+
     def _offset(self, me: ClientState, anchor: ClientState) -> tuple[float, float]:
         """Anchor minus me, in map units with x stretched to the same scale as y."""
         return (anchor.map_x - me.map_x) * self.cfg.map_aspect, anchor.map_y - me.map_y
@@ -221,7 +243,7 @@ class Stacker:
         try:
             me, target = self._pose(slot), self._pose(anchor)
             if (me.map_id, me.map_level) != (target.map_id, target.map_level):
-                raise StackError("not on the same map as the anchor")
+                raise StackError("in another zone than the anchor")
             if me.following:  # /follow would fight us: any movement key breaks it
                 self._press_frames(slot, "back", 1, me, cancel)
             # 1. roughly face the anchor's way: moves are measured along the actual facing, so rough is enough
@@ -232,6 +254,8 @@ class Stacker:
                     raise StackError("timed out")
                 target = self._pose(anchor)
                 dx, dy = self._offset(me, target)
+                if why := self._too_far(me, target):
+                    raise StackError(f"too far away ({why}, max {self.cfg.max_distance_yards:g} yd): use follow")
                 tol = self.distance_tolerance(me)
                 if tol is not None and math.hypot(dx, dy) <= tol:
                     break

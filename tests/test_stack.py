@@ -152,7 +152,7 @@ def test_different_map_and_no_position():
     w = World()
     w.add(1, 500, 500, 0)
     w.add(2, 503, 500, 0, map_id=2)
-    assert "same map" in stacker(w).stack(2, 1).message
+    assert "another zone" in stacker(w).stack(2, 1).message
     w2 = World()
     w2.add(1, 500, 500, 0)
     w2.add(2, 503, 500, 0)
@@ -232,3 +232,34 @@ def test_restack_when_close_but_not_within_tolerance():
     w.sleep(0.3)
     r = s.stack(2, 1)
     assert r.ok and r.moves >= 1 and w.distance(1, 2) < 0.15
+
+
+def test_apart():
+    from wowbox.stack import apart
+    lead = ClientState(position_ok=True, map_x=0.5, map_y=0.5, map_id=10)
+    near = ClientState(position_ok=True, map_x=0.51, map_y=0.5, map_id=10)
+    upy = 0.01 / 7.5  # map units per yard: 0.01 x-units * 1.5 aspect = 0.015 units = ~11 yd here
+    assert apart(near, lead, 40, upy) is None
+    far = ClientState(position_ok=True, map_x=0.6, map_y=0.5, map_id=10)
+    assert apart(far, lead, 40, upy) == "112 yd away"
+    assert apart(far, lead, 40, None) is None  # zone scale not measured yet: can't tell
+    other = ClientState(position_ok=True, map_x=0.5, map_y=0.5, map_id=11)
+    assert apart(other, lead, 40, upy) == "in another zone"
+    no_coords = ClientState(position_ok=False, map_id=11)
+    assert apart(no_coords, lead, 40, upy) == "in another zone"  # map id still tells, without coordinates
+    assert apart(ClientState(map_id=0), lead, 40, upy) is None  # unknown map: can't tell
+    assert apart(ClientState(stale=True, map_id=11), lead, 40, upy) is None
+    assert apart(near, None, 40, upy) is None
+
+
+def test_stack_refuses_followers_too_far_away():
+    w = World()
+    w.add(1, 500, 500, 0)
+    w.add(2, 503, 500, 0)
+    s = stacker(w, max_distance_yards=40)
+    assert s.stack(2, 1).ok  # learns this zone's scale
+    w.chars[2]["e"] = 600  # 100 yd away
+    w.sleep(0.3)
+    t0 = w.t
+    r = s.stack(2, 1)
+    assert not r.ok and "too far away" in r.message and w.t - t0 < 1.0

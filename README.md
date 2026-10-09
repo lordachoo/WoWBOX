@@ -306,6 +306,8 @@ WoW's `/follow` breaks constantly: a cast, a mount, a door, a jump, a loading sc
   - **Stack first.** Mirrored keys only give the same path if everyone starts stacked and faces the same way.
   - **Turn with A/D.** Mouse turning (right-drag) isn't copied.
   - **Obstacles still split them.** Anyone who hits a corner differently drifts, and the next stop fixes it.
+  - **Only followers who are with you get your keys** (`follow.mirror_guard`, on by default). A follower is left out while it's **in another zone** or **more than `mirror_max_distance_yards` (40) away** from the character you're steering. Your characters can be spread around the world, and mirroring only moves the ones standing with you. The Log tab says when someone is left out and when they're back. The Position column shows `[in another zone]` or `[85 yd away]` next to anyone who isn't with the leader.
+    - The zone check always works: the addon reports the zone's map ID, even where there are no coordinates. The yard check needs the zone's scale, which WoWBox learns the first time you stack there. Until then, only the zone is checked.
   - **Test first.** Some clients don't take held movement keys while in the background. Try a short walk.
 - **Using an in-game macro instead.** Set `follow.start_key` / `follow.refollow_key` to a key bound to an in-game `/follow` macro, and WoWBox presses that key instead of typing.
 
@@ -326,6 +328,7 @@ More details:
 - **The anchor** is the window you're in when you press F12, or the client where you typed `/bb stack`. If you press F12 in WoWBox itself, the leader is the anchor.
 - **Mirroring plus stacking is lockstep.** With mirroring on, the followers restack every time you stop moving (`stack.on_stop`). This replaces `/follow` while mirroring, because follow would pull them behind you. Press your movement keys and they move with you. Stop, and any drift is corrected within a second or two.
 - **You can always take over.** Pressing a movement key yourself cancels a running stack. So does pressing F12 again.
+- **Only nearby followers are stacked.** A follower in another zone, or more than `stack.max_distance_yards` (40) away, is skipped at once ("in another zone" / "too far away … use follow") instead of being walked across the map. Use F10 (follow) to bring it close first.
 - **Frame rate sets the precision.** See [Frame rate and stacking precision](#frame-rate-and-stacking-precision) below. In short: **run every client at 144 fps** for facing within 1°.
 - **Where it works:** anywhere the client gives map coordinates. That includes the EQ zones on your server (tested with `GetPlayerMapPosition`). In a place without coordinates, the Position column stays empty and stacking reports "no map position". Use follow there.
 - **Keep the world map closed.** Positions are relative to the map being shown, so while a client has its world map open, that client reports no position.
@@ -337,9 +340,10 @@ stack:
   who: all                  # who gets stacked; the anchor is always left out
   on_stop: true             # while mirroring, re-stack whenever you stop
   on_stop_delay: 400ms
-  tolerance_yards: 0.5
-  facing_tolerance_deg: 3   # widened automatically for low frame rates
+  tolerance_yards: 0.1
+  facing_tolerance_deg: 1   # widened automatically to half a frame (see below)
   timeout: 10s
+  max_distance_yards: 40    # farther away, or another zone: skipped
   run_speed: 7.0
   map_aspect: 1.5           # zone maps are 3:2
 ```
@@ -387,6 +391,8 @@ follow:
   stop_key: "S"
   movement_keys: ["W", "A", "S", "D", "Q", "E", "Space"]
   mirror_on_start: false
+  mirror_guard: true                # only mirror to followers in your zone, within:
+  mirror_max_distance_yards: 40
 ```
 
 ## 12. Macros

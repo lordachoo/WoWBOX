@@ -218,3 +218,13 @@ def test_mirroring_stacks_when_you_stop_instead_of_refollowing():
     router.last_movement = 15.0
     fm.tick(16)
     assert stacked == [1, 1]
+
+
+def test_mirror_guard_leaves_out_followers_elsewhere():
+    r = Rig()
+    r.router.mirror_vks = {VK["W"]}
+    r.router.set_mirror(True)
+    r.router.mirror_allowed = lambda leader, slot: slot != 3  # slot 3 is in another zone
+    r.press(VK["W"])
+    r.press(VK["W"], False)
+    assert set(r.posted_to()) == {2, 4}

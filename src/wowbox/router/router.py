@@ -56,6 +56,8 @@ class Router:
         self.mirror = False  # copy movement keys to `mirror_target` as well as their normal route
         self.mirror_vks: set[int] = set()
         self.mirror_target: Target = "followers"
+        # mirror_allowed(leader_slot, follower_slot): False leaves that follower out (e.g. it's in another zone)
+        self.mirror_allowed: Callable[[int | None, int], bool] = lambda leader, slot: True
         self.last_movement = -1e9  # monotonic time of the last movement key event
         self.hotkeys_paused = False  # e.g. while the macro editor records a hotkey
         self.set_hotkeys(hotkeys, macros or [])
@@ -189,7 +191,8 @@ class Router:
         target = self.routes.lookup(chord)
         slots = self.team.resolve(target, active)
         if self.mirror and vk in self.mirror_vks:
-            slots = sorted(set(slots) | set(self.team.resolve(self.mirror_target, active)))
+            mirrored = [s for s in self.team.resolve(self.mirror_target, active) if self.mirror_allowed(active, s)]
+            slots = sorted(set(slots) | set(mirrored))
         others = tuple(s for s in slots if s != active)
         swallow = active is not None and active not in slots
         mods = Mod.NONE if self.cfg.modifier_mode == "strip" else chord.mods
