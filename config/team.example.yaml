@@ -1,0 +1,149 @@
+# WoWBox team config. Copy to team.yaml (WoWBox does this on first run) and edit.
+# Key names: 1-9, 0, A-Z, F1-F24, Numpad0-9, Space, Enter, Esc, Tab, Pause, ScrollLock, - = / [ ] ; ' , . `
+# Chords: Ctrl+1, Alt+F2, Ctrl+Alt+Pause, Shift+3. Durations: 500ms, 1.5s, 20s, 25m, 1h.
+
+client:
+  exe: "C:/Games/WoW335/Wow.exe"
+  args: []
+  set_windowed_cvars: false     # true = write gxWindow 1 / gxMaximize 0 (+ resolution) to WTF/Config.wtf before launch (backed up first)
+  resolution: null              # e.g. "1280x720"; only used with set_windowed_cvars
+  launch_stagger: 3s
+  window_timeout: 120s
+  rename_windows: true          # titles become "WoW1 - CharacterName"
+
+team:
+  leader: 1
+  # character: in-game name. With BoxBridge running, the window showing that character is moved into the slot.
+  # The "Remember characters" button in the Clients tab fills these in for you.
+  slots:
+    1: { label: "Tankadin", role: tank }
+    2: { label: "Shammy1",  role: dps }
+    3: { label: "Shammy2",  role: healer }
+    4: { label: "Mage",     role: dps }
+
+layout:
+  default: grid_auto            # grid_auto (best fit for your monitor) | grid_2x2 | grid_1x3 | main_thumbs | tabs
+  monitor: 1                    # 1 = primary
+  thumbs_monitor: null          # e.g. 2 to put the thumbnails on monitor 2 (main_thumbs layout)
+  thumb_strip: 0.22             # strip height as a fraction of the monitor, when on the same monitor
+  tab_bar_height: 28
+
+hotkeys:                        # work while a WoW client or WoWBox has focus
+  toggle_broadcast: "ScrollLock"
+  release_all: "Ctrl+Alt+Pause" # emergency: key-up for everything on every client
+  cycle_layout: "Ctrl+Alt+L"
+  next_main: "Ctrl+Alt+N"       # main_thumbs / tabs: next client becomes main
+  automation_kill: "Ctrl+Alt+K"
+  follow: "F10"                 # followers /target + /follow the leader; follow mode ON (re-follows when it breaks)
+  stay: "F11"                   # followers stop; follow mode OFF
+  mirror_movement: "Ctrl+Alt+M" # toggle: your movement keys also go to the followers
+  focus_slot:                   # jump straight to a client
+    1: "Ctrl+Alt+1"
+    2: "Ctrl+Alt+2"
+    3: "Ctrl+Alt+3"
+    4: "Ctrl+Alt+4"
+
+broadcast:
+  enabled_on_start: true
+  chatguard: true               # pause broadcasting while you type in chat
+  chatguard_open_keys: ["Enter", "/"]
+  chatguard_close_keys: ["Enter", "Esc"]
+  modifier_mode: post           # post | focus_swap | strip - how Shift/Ctrl/Alt chords reach background clients (see README)
+  focus_swap_dwell: 40ms
+  only_when_wow_focused: true
+
+follow:
+  leader: leader                # who to follow (the leader slot; or a character name)
+  who: not:leader               # who follows
+  start: ["/target {leader}", "/follow {leader}"]   # typed on followers when you press `follow`
+  refollow: true                # put followers back on /follow when it breaks (needs BoxBridge)
+  refollow_command: "/follow {leader}"
+  refollow_delay: 1s            # off follow this long (and you not moving) before re-follow
+  refollow_in_combat: false     # false: casters stay put in a fight, follow again after it
+  stop_key: "S"                 # `stay` taps this on followers (any movement breaks /follow)
+  movement_keys: ["W", "A", "S", "D", "Q", "E", "Space"]   # copied to followers while mirroring
+  mirror_on_start: false
+
+# Who receives each key. First match wins; a chord matches exactly (Shift+1 is not 1).
+# Keys that aren't listed only go to the window you're in.
+# to: all | active | followers (everyone but you) | leader | none | [slot, ...]
+routes:
+  - keys: ["1-9", "0", "-", "="]
+    to: all
+    note: rotation bar
+  - keys: ["F1"]
+    to: followers
+    note: follow macro on followers
+  - keys: ["W", "A", "S", "D", "Q", "E", "Space"]
+    to: active
+    note: movement stays on the window you're in
+  - keys: ["Ctrl+1"]
+    to: [3]
+    note: healer only
+
+# Macros: named sequences you fire with a hotkey from ANY WoW window (or the Macros tab). Press again to stop.
+# Steps:  type: "/chat line"     - opens chat, types it, presses Enter (in the target clients only)
+#         send: "Ctrl+9"         - one key press
+#         keys: ["1-9", "0"]     - several presses, `delay` apart
+#         wait: 500ms
+#         sequence: [ ...steps ]
+# to: [2] | all | followers | leader | Gnope (character) | class:WARLOCK | role:healer
+macros:
+  - name: warlock-assist-and-nuke
+    key: "F8"
+    note: The warlock assists the tank, then walks the action bar
+    do:
+      sequence:
+        - { type: "/assist Tankadin", to: "class:WARLOCK" }
+        - { wait: 300ms }
+        - { keys: ["1-9", "0"], delay: 1.5s, to: "class:WARLOCK" }
+  - name: everyone-assist-tank
+    key: "F9"
+    do: { type: "/assist Tankadin", to: followers }
+
+bridge:                         # needs the BoxBridge addon in every client
+  enabled: true
+  hz: 10
+  block_size: 8                 # /boxbridge size (default 8); only sizes the capture area
+  method: auto                  # auto (screen grab if visible, PrintWindow if covered) | mss | dxcam | printwindow
+  stale_after: 1.5s
+
+automation:
+  - name: healer-drinks-out-of-combat
+    enabled: false
+    when: { slot: 3, combat: false, power_pct_lt: 40, mounted: false, dead: false }
+    do:   { send: "Ctrl+9", to: [3] }
+    cooldown: 20s
+  - name: rebuff-timer
+    enabled: false
+    every: 25m
+    do:
+      sequence:
+        - { send: "F5", to: all }
+        - { wait: 1.5s }
+        - { send: "F6", to: all }
+  - name: kunth-heals-on-whisper     # whisper "heal" to Shammy from Tankadin or Locky; test in-game: /bb test Tankadin heal
+    chat: { channel: whisper, sender: [Tankadin, Locky], contains: [heal], heard_by: Shammy }
+    do:
+      sequence:
+        - { type: "/target {sender}", to: Shammy }
+        - { wait: 200ms }
+        - { send: "3", to: Shammy }             # change to Shammy's heal button
+        - { type: "/targetlasttarget", to: Shammy }
+    cooldown: 3s
+
+automation_options:
+  enabled_on_start: false       # automation always starts OFF unless you change this
+  dry_run: true                 # log what would be sent without sending
+  tick_hz: 10
+  pause_on_stale_bridge: true   # pause everything if any client's bridge goes stale
+
+memread:                        # optional, read-only ReadProcessMemory. Off by default.
+  enabled: false
+  hz: 5
+  fields: {}
+  # fields:
+  #   player_hp: { address: "0x00BD0000", module: "Wow.exe", offsets: ["0x24"], type: u32 }   # you supply and verify offsets
+
+ui:
+  overlay: false

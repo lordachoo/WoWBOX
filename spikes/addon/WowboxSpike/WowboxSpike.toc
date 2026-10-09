@@ -1,0 +1,5 @@
+## Interface: 30300
+## Title: WoWBox Spike
+## Notes: Phase 0 test helper for WoWBox (spikes S1, S2, S7, S9). Not the real BoxBridge. /wbs for commands.
+## Version: 0.1
+WowboxSpike.lua

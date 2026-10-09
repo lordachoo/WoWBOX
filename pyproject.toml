@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wowbox"
+version = "0.1.0"
+description = "Multibox controller for WotLK 3.3.5a: launcher, layouts, input router, pixel bridge, automation"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "PySide6>=6.6",
+    "pydantic>=2.6",
+    "PyYAML>=6.0",
+    "numpy>=1.26",
+    "mss>=9.0",
+]
+
+[project.optional-dependencies]
+dxcam = ["dxcam>=0.0.5", "opencv-python-headless>=4.8"]
+dev = ["pytest>=8", "Pillow>=10", "pyinstaller>=6.5", "lupa>=2.0"]
+
+[project.scripts]
+wowbox = "wowbox.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

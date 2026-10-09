@@ -1,0 +1,273 @@
+"""Pixels -> ClientState. Must stay in sync with addon/BoxBridge/BoxBridge.lua.
+
+The addon draws a row of square blocks at the client's top-left corner. Each block carries two data
+bytes in R and G; B is a marker that alternates between 224 (even blocks) and 32 (odd blocks), so every
+block boundary is a visible edge even when two blocks hold the same data. The decoder finds blocks by
+those edges rather than assuming a width, so it works however the game stretches its picture to the window.
+
+Byte stream (2 bytes per block):
+
+     0  0xB0 magic           1  0x0B magic           2  frame counter
+     3  health 0-255         4  power 0-255          5  power type
+     6  target health        7  target flags         8  player flags
+     9  input flags         10  cast flags          11  status flags
+    12  party1 health       13  party2 health       14  party3 health    15  party4 health
+    16  level               17  party-exists bits
+    18-41  character name, UTF-8, zero padded (24 bytes)
+    42-53  class token (e.g. PALADIN), zero padded (12 bytes)
+    54  sum(bytes 0..53) % 256                      55  xor(bytes 0..53)
+
+Chat frames use the same strip with 0x0C as the second magic byte. The addon shows one for each chat line
+it hears, held for about half a second, between normal state frames:
+
+     0  0xB0 magic           1  0x0C magic           2  frame counter (shared with state frames)
+     3  event sequence       4  channel (CHAT_CHANNELS)  5  full message length in bytes (max 255)
+     6-25   sender, UTF-8, zero padded (20 bytes)
+    26-52   message, UTF-8, zero padded (27 bytes; longer messages are cut)
+    53  input flags right now (same bits as byte 9 of a state frame)
+    54  sum % 256                                   55  xor
+"""
+from __future__ import annotations
+
+import time
+from dataclasses import dataclass, field, fields
+
+import numpy as np
+
+MAGIC = (0xB0, 0x0B)
+KIND_STATE, KIND_CHAT = 0x0B, 0x0C
+MARK_EVEN, MARK_ODD = 224, 32
+NAME_BYTES = slice(18, 42)
+CLASS_BYTES = slice(42, 54)
+CHAT_SENDER_BYTES = slice(6, 26)
+CHAT_TEXT_BYTES = slice(26, 53)
+CHAT_INPUT_BYTE = 53
+NUM_BYTES = 56
+NUM_BLOCKS = NUM_BYTES // 2
+
+# flag bits
+T_EXISTS, T_HOSTILE, T_DEAD, T_PLAYER, T_COMBAT = 1, 2, 4, 8, 16
+P_COMBAT, P_RESTING, P_PARTY, P_RAID = 1, 2, 4, 8
+I_TYPING, I_CHAT = 1, 2
+C_CASTING, C_CHANNELING = 1, 2
+S_MOUNTED, S_DEAD, S_GHOST, S_AFK, S_FOLLOWING = 1, 2, 4, 8, 16
+
+POWER_TYPES = {0: "mana", 1: "rage", 2: "focus", 3: "energy", 6: "runic"}
+# channel byte -> name; order matches the addon's CHANNELS table
+CHAT_CHANNELS = {1: "whisper", 2: "party", 3: "raid", 4: "guild", 5: "officer", 6: "say", 7: "yell",
+                 8: "command"}  # command: you typed /bb all|others|to; sender = who it's for, text = the command
+
+
+@dataclass(frozen=True)
+class ChatEvent:
+    channel: str
+    sender: str
+    text: str
+    seq: int = 0
+    length: int = 0  # full length in bytes; more than len(text) when the addon had to cut it
+    frame: int = 0
+    typing: bool = False  # the client's input flags while the line is shown: the chat frame
+    chat_open: bool = False  # replaces state frames for a while, so it carries these itself
+
+    @property
+    def truncated(self) -> bool:
+        return self.length > len(self.text.encode("utf-8"))
+
+
+@dataclass
+class ClientState:
+    frame: int = 0
+    health_pct: float = 0.0
+    power_pct: float = 0.0
+    power_type: int = 0
+    target_exists: bool = False
+    target_hostile: bool = False
+    target_dead: bool = False
+    target_is_player: bool = False
+    target_in_combat: bool = False
+    target_health_pct: float = 0.0
+    combat: bool = False
+    resting: bool = False
+    in_party: bool = False
+    in_raid: bool = False
+    typing: bool = False  # any edit box has keyboard focus
+    chat_open: bool = False
+    casting: bool = False
+    channeling: bool = False
+    mounted: bool = False
+    dead: bool = False
+    ghost: bool = False
+    afk: bool = False
+    following: bool = False  # on /follow (AUTOFOLLOW_BEGIN .. AUTOFOLLOW_END)
+    level: int = 0
+    party_health_pct: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
+    party_exists: tuple[bool, bool, bool, bool] = (False, False, False, False)
+    name: str = ""
+    class_token: str = ""
+    stale: bool = False
+    updated_at: float = field(default_factory=time.monotonic)
+
+    @property
+    def power_name(self) -> str:
+        return POWER_TYPES.get(self.power_type, str(self.power_type))
+
+    def summary(self) -> str:
+        if self.stale:
+            return "stale"
+        t = f"T {self.target_health_pct:.0f}%" if self.target_exists else "no target"
+        flags = [n for n, v in (("combat", self.combat), ("casting", self.casting or self.channeling),
+                                ("typing", self.typing), ("mounted", self.mounted), ("following", self.following), ("dead", self.dead or self.ghost))
+                 if v]
+        return (f"{self.name or '?'} {self.class_token.title()} | HP {self.health_pct:.0f}% "
+                f"{self.power_name[:4]} {self.power_pct:.0f}% | {t} | {' '.join(flags)}")
+
+
+STATE_FIELDS = {f.name for f in fields(ClientState)} | {"power_name"}
+
+
+class DecodeError(ValueError):
+    pass
+
+
+def checksum(values: list[int] | bytes) -> tuple[int, int]:
+    s, x = 0, 0
+    for v in values:
+        s += v
+        x ^= v
+    return s % 256, x
+
+
+def _close(px: np.ndarray, rgb: tuple[int, int, int], tol: int) -> bool:
+    return all(abs(int(px[i]) - rgb[i]) <= tol for i in range(3))
+
+
+def _runs(row: np.ndarray, tol: int) -> list[tuple[int, int]]:
+    """Split a pixel row into (start, length) runs of near-constant colour."""
+    runs, start = [], 0
+    for x in range(1, row.shape[0] + 1):
+        if x == row.shape[0] or np.abs(row[x].astype(int) - row[start].astype(int)).max() > tol:
+            runs.append((start, x - start))
+            start = x
+    return runs
+
+
+def _header(px: np.ndarray, tol: int) -> tuple[int, int, int] | None:
+    for kind in (KIND_STATE, KIND_CHAT):
+        if _close(px, (MAGIC[0], kind, MARK_EVEN), tol):
+            return MAGIC[0], kind, MARK_EVEN
+    return None
+
+
+def decode(img: np.ndarray, *, tol: int = 4) -> ClientState:
+    """A state frame. Raises DecodeError for anything else, chat frames included."""
+    st = decode_frame(img, tol=tol)
+    if not isinstance(st, ClientState):
+        raise DecodeError("chat frame, not a state frame")
+    return st
+
+
+def decode_frame(img: np.ndarray, *, tol: int = 4) -> ClientState | ChatEvent:
+    """img: RGB uint8 (h, w, 3) starting at the client's top-left pixel."""
+    if img.ndim != 3 or img.shape[0] < 1 or img.shape[1] < NUM_BLOCKS:
+        raise DecodeError("image too small")
+    probe_x = 1 if img.shape[1] > 1 else 0
+    header = next((h for y in range(min(2, img.shape[0])) if (h := _header(img[y, probe_x], tol))), None)
+    if header is None:
+        raise DecodeError("no BoxBridge header (addon off, UI hidden, or wrong capture region)")
+    height = 0
+    while height < img.shape[0] and _close(img[height, probe_x], header, tol):
+        height += 1
+    row = img[max(0, height // 2) if height else 1]
+
+    runs = _runs(row, tol)
+    header_len = runs[0][1]
+    min_len = max(2, int(header_len * 0.35)) if header_len >= 3 else 1  # shorter runs are blended edge pixels
+    blocks = [row[start + length // 2] for start, length in runs if length >= min_len]
+    if len(blocks) < NUM_BLOCKS:
+        raise DecodeError(f"only {len(blocks)} of {NUM_BLOCKS} blocks visible (strip covered or cut off?)")
+    data = []
+    for i, px in enumerate(blocks[:NUM_BLOCKS]):
+        mark = MARK_EVEN if i % 2 == 0 else MARK_ODD
+        if abs(int(px[2]) - mark) > 40:
+            raise DecodeError(f"block {i}: marker {int(px[2])} != {mark} (blocks merged or split)")
+        data += [int(px[0]), int(px[1])]
+    s, x = checksum(data[:-2])
+    if (s, x) != (data[-2], data[-1]):
+        raise DecodeError(f"checksum failed ({len(blocks)} blocks, header {header_len}x{height}px)")
+    if data[1] == KIND_CHAT:
+        return _to_chat(bytes(data))
+    return _to_state(bytes(data))
+
+
+def _pct(v: int) -> float:
+    return round(v * 100.0 / 255.0, 1)
+
+
+def _text(raw: bytes) -> str:
+    return raw.split(b"\0", 1)[0].decode("utf-8", errors="ignore")  # "ignore": a cut may split a character
+
+
+def _to_chat(d: bytes) -> ChatEvent:
+    return ChatEvent(channel=CHAT_CHANNELS.get(d[4], f"channel{d[4]}"), sender=_text(d[CHAT_SENDER_BYTES]),
+                     text=_text(d[CHAT_TEXT_BYTES]), seq=d[3], length=d[5], frame=d[2],
+                     typing=bool(d[CHAT_INPUT_BYTE] & I_TYPING), chat_open=bool(d[CHAT_INPUT_BYTE] & I_CHAT))
+
+
+def _to_state(d: bytes) -> ClientState:
+    tf, pf, inp, cast, st, pbits = d[7], d[8], d[9], d[10], d[11], d[17]
+    return ClientState(
+        frame=d[2],
+        health_pct=_pct(d[3]), power_pct=_pct(d[4]), power_type=d[5],
+        target_health_pct=_pct(d[6]),
+        target_exists=bool(tf & T_EXISTS), target_hostile=bool(tf & T_HOSTILE), target_dead=bool(tf & T_DEAD),
+        target_is_player=bool(tf & T_PLAYER), target_in_combat=bool(tf & T_COMBAT),
+        combat=bool(pf & P_COMBAT), resting=bool(pf & P_RESTING), in_party=bool(pf & P_PARTY),
+        in_raid=bool(pf & P_RAID),
+        typing=bool(inp & I_TYPING), chat_open=bool(inp & I_CHAT),
+        casting=bool(cast & C_CASTING), channeling=bool(cast & C_CHANNELING),
+        mounted=bool(st & S_MOUNTED), dead=bool(st & S_DEAD), ghost=bool(st & S_GHOST), afk=bool(st & S_AFK),
+        following=bool(st & S_FOLLOWING),
+        party_health_pct=(_pct(d[12]), _pct(d[13]), _pct(d[14]), _pct(d[15])),
+        level=d[16],
+        party_exists=tuple(bool(pbits & (1 << i)) for i in range(4)),  # type: ignore[arg-type]
+        name=_text(d[NAME_BYTES]),
+        class_token=_text(d[CLASS_BYTES]),
+    )
+
+
+def encode_bytes(values: dict, frame: int) -> list[int]:
+    """Reference encoder (mirrors the Lua addon)."""
+    v = values
+    party = list(v.get("party", [0, 0, 0, 0]))
+    data = [MAGIC[0], MAGIC[1], frame % 256,
+            v.get("health", 0), v.get("power", 0), v.get("power_type", 0),
+            v.get("target_health", 0), v.get("target_flags", 0), v.get("player_flags", 0),
+            v.get("input_flags", 0), v.get("cast_flags", 0), v.get("status_flags", 0),
+            *party[:4], v.get("level", 0), v.get("party_bits", 0)]
+    data += list(v.get("name", "").encode("utf-8")[:24].ljust(24, b"\0"))
+    data += list(v.get("class", "").encode("utf-8")[:12].ljust(12, b"\0"))
+    data += list(checksum(data))
+    assert len(data) == NUM_BYTES
+    return data
+
+
+def encode_chat_bytes(channel: str, sender: str, text: str, seq: int, frame: int, input_flags: int = 0) -> list[int]:
+    """Reference encoder for chat frames (mirrors the Lua addon)."""
+    code = next(k for k, v in CHAT_CHANNELS.items() if v == channel)
+    raw = text.encode("utf-8")
+    data = [MAGIC[0], KIND_CHAT, frame % 256, seq % 256, code, min(len(raw), 255)]
+    data += list(sender.encode("utf-8")[:20].ljust(20, b"\0"))
+    data += list(raw[:27].ljust(27, b"\0"))
+    data.append(input_flags)
+    data += list(checksum(data))
+    assert len(data) == NUM_BYTES
+    return data
+
+
+def encode(values: dict, frame: int, block: int, data: list[int] | None = None) -> np.ndarray:
+    """The strip as the addon draws it, `block` px per block (`data` overrides, e.g. a chat frame)."""
+    data = data or encode_bytes(values, frame)
+    img = np.zeros((block, block * NUM_BLOCKS, 3), dtype=np.uint8)
+    for i in range(NUM_BLOCKS):
+        img[:, i * block:(i + 1) * block] = (data[2 * i], data[2 * i + 1], MARK_EVEN if i % 2 == 0 else MARK_ODD)
+    return img
