@@ -307,7 +307,7 @@ WoW's `/follow` breaks constantly: a cast, a mount, a door, a jump, a loading sc
   - **Turn with A/D.** Mouse turning (right-drag) isn't copied.
   - **Obstacles still split them.** Anyone who hits a corner differently drifts, and the next stop fixes it.
   - **Only followers who are with you get your keys** (`follow.mirror_guard`, on by default). A follower is left out while it's **in another zone** or **more than `mirror_max_distance_yards` (40) away** from the character you're steering. Your characters can be spread around the world, and mirroring only moves the ones standing with you. The Log tab says when someone is left out and when they're back. The Position column shows `[in another zone]` or `[85 yd away]` next to anyone who isn't with the leader.
-    - The zone check always works: the addon reports the zone's map ID, even where there are no coordinates. The yard check needs the zone's scale, which WoWBox learns the first time you stack there. Until then, only the zone is checked.
+    - The zone check always works: the addon reports the zone's map ID, even where there are no coordinates. The yard check needs the zone's scale, which WoWBox measures while stacking there. It only uses that scale once two measurements agree, so one bad reading (a blocked step, your own keys mixed in) can't make a character standing next to you look far away. Until then, only the zone is checked. The scale is re-measured each time WoWBox starts.
   - **Test first.** Some clients don't take held movement keys while in the background. Try a short walk.
 - **Using an in-game macro instead.** Set `follow.start_key` / `follow.refollow_key` to a key bound to an in-game `/follow` macro, and WoWBox presses that key instead of typing.
 

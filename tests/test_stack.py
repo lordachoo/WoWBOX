@@ -53,7 +53,8 @@ class World:
         end = self.t + dt
         step = 1 / 240
         while self.t < end:
-            self.t = min(end, self.t + step)
+            dt = min(step, end - self.t)
+            self.t += dt
             if self.t >= self._next_frame:  # a game frame: apply keys that arrived since the last one
                 self._next_frame += 1 / self.fps
                 for ev in [p for p in self.pending if p[0] <= self.t]:
@@ -61,7 +62,7 @@ class World:
                     (self.chars[slot]["held"].add if down else self.chars[slot]["held"].discard)(vk)
                     self.pending.remove(ev)
             for c in self.chars.values():
-                self._move(c, step)
+                self._move(c, dt)
             if self.t >= self._next_draw:
                 self._next_draw += 1 / 15
                 self._draw()
@@ -72,6 +73,8 @@ class World:
             c["f"] = (c["f"] + TURN * dt) % (2 * math.pi)
         if "D" in held:
             c["f"] = (c["f"] - TURN * dt) % (2 * math.pi)
+        if c.get("blocked_until", 0) > self.t:  # rooted / walking into a wall / keys fighting: no movement
+            return
         for key, vec in (("W", forward_vector(c["f"])), ("E", right_vector(c["f"]))):
             back = {"W": "S", "E": "Q"}[key]
             sign = (key in held) - (back in held)
@@ -263,3 +266,42 @@ def test_stack_refuses_followers_too_far_away():
     t0 = w.t
     r = s.stack(2, 1)
     assert not r.ok and "too far away" in r.message and w.t - t0 < 1.0
+
+
+def test_blocked_first_probe_doesnt_poison_the_speed():
+    """Seen live: the first measuring step barely moved (keys mixed with mirrored ones), so the character
+    'ran' 2000x too slowly, and a follower standing on you counted as thousands of yards away."""
+    from wowbox.stack import apart
+    w = World(fps=144)
+    w.add(1, 500, 500, 1.0)
+    w.add(2, 503, 502, 2.0)
+    w.chars[2]["blocked_until"] = 1.2  # covers the turn and the first probe
+    s = stacker(w)
+    r = s.stack(2, 1)
+    assert r.ok, r.message
+    assert w.distance(1, 2) < 0.15
+    # stack again a few times: the speed gets confirmed
+    for e in (4, -3, 2):
+        w.chars[2]["e"] += e
+        w.sleep(0.3)
+        assert s.stack(2, 1).ok
+    lead, me = w.read(1), w.read(2)
+    upy = s.units_per_yard(lead)  # trusted zone scale
+    assert upy == pytest.approx(1 / ZONE_H, rel=0.15)  # 7 yd/s really is 7 yd/s
+    assert apart(me, lead, 40, upy) is None  # standing together = together
+
+
+def test_one_bad_measurement_is_set_aside():
+    w = World()
+    w.add(1, 500, 500, 0)
+    s = stacker(w)
+    st = w.read(1)
+    for v in (0.007, 0.007):
+        s._learn(2, st, "forward", v)
+    s._learn(2, st, "forward", 0.000003)  # one wild reading
+    assert s._speed(2, st, "forward") == pytest.approx(0.007)
+    s._learn(2, st, "forward", 0.0070)  # back to normal: the outlier is forgotten
+    s._learn(2, st, "forward", 0.020)  # on a fast mount now (almost 3x): set aside once...
+    assert s._speed(2, st, "forward") == pytest.approx(0.007, rel=0.05)
+    s._learn(2, st, "forward", 0.021)  # ...and accepted when it repeats
+    assert s._speed(2, st, "forward") == pytest.approx(0.0205)

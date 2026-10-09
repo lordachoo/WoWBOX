@@ -36,6 +36,8 @@ from .keys import parse_chord
 log = logging.getLogger(__name__)
 
 PROBE_HOLD = 0.25  # first move of a kind, to measure its speed
+MIN_LEARN_HOLD = 0.1  # only presses at least this long teach a speed (a frame off is then a small error)
+UNTRUSTED_HOLD = 0.6  # longest move while a speed isn't confirmed by a second measurement
 MAX_HOLD = 4.0
 QUANTUM_SLACK = 0.55  # an error under half a frame's worth of movement can't be corrected (whole frames only)
 COARSE_FACING_DEG = 8.0  # facing needed while walking; the exact facing is set at the end
@@ -105,7 +107,9 @@ class Stacker:
         self.post = post
         self.clock = clock
         self.sleep = sleep
-        self._speeds: dict[tuple, float] = {}  # (map_id, level, key) -> map units / s
+        self._speeds: dict[tuple, float] = {}  # (slot, map_id, level, key) -> map units / s
+        self._samples: dict[tuple, int] = {}  # measurements that agreed with the estimate
+        self._pending: dict[tuple, float] = {}  # a measurement that didn't fit, waiting for a second opinion
         self._turn_rate: float | None = None  # rad / s
         self.load(cfg)
 
@@ -166,34 +170,65 @@ class Stacker:
         """The configured tolerance, or half a frame of turning if that's coarser (nothing finer is possible)."""
         return max(math.radians(self.cfg.facing_tolerance_deg), QUANTUM_SLACK * self.turn_rate() / self._fps(st))
 
-    def distance_tolerance(self, st: ClientState) -> float | None:
+    def distance_tolerance(self, slot: int, st: ClientState) -> float | None:
         """In map units, or None while the speed is unknown."""
-        upy = self.units_per_yard(st)
+        upy = self.units_per_yard(st, slot)
         if upy is None:
             return None
-        return max(self.cfg.tolerance_yards * upy, QUANTUM_SLACK * self._speed(st, "forward") / self._fps(st))
+        return max(self.cfg.tolerance_yards * upy, QUANTUM_SLACK * self._speed(slot, st, "forward") / self._fps(st))
 
-    def _speed(self, st: ClientState, key: str) -> float | None:
-        mk = (st.map_id, st.map_level)
-        if (v := self._speeds.get(mk + (key,))) is not None:
+    # Speeds are measured per character (a mounted or slowed one moves differently) and per map (each zone map
+    # has its own scale). One bad measurement - the character was blocked, a reading was stale, or your own
+    # mirrored keys moved it at the same time - must not poison the estimate: a value more than 2x off the
+    # current one is set aside, and only replaces it if the next measurement agrees with it. A speed is
+    # *trusted* once two measurements agree; only trusted speeds are used to turn map distances into yards for
+    # the distance guards, and moves stay short while a speed isn't trusted yet.
+    def _key(self, slot: int, st: ClientState, key: str) -> tuple:
+        return slot, st.map_id, st.map_level, key
+
+    def _speed(self, slot: int, st: ClientState, key: str) -> float | None:
+        if (v := self._speeds.get(self._key(slot, st, key))) is not None:
             return v
-        fwd = self._speeds.get(mk + ("forward",)) or self._speeds.get(mk + ("strafe_left",)) or \
-            self._speeds.get(mk + ("strafe_right",))
+        fwd = next((v for k in ("forward", "strafe_left", "strafe_right")
+                    if (v := self._speeds.get(self._key(slot, st, k))) is not None), None)
         if fwd is None:
             return None
         return fwd * (4.5 / 7.0) if key == "back" else fwd  # backpedal is slower; strafing runs at full speed
 
-    def _learn(self, st: ClientState, key: str, speed: float) -> None:
-        k = (st.map_id, st.map_level, key)
-        old = self._speeds.get(k)
-        self._speeds[k] = speed if old is None else old + (speed - old) * SPEED_SMOOTHING
+    def _trusted(self, slot: int, st: ClientState, key: str) -> bool:
+        return self._samples.get(self._key(slot, st, key), 0) >= 2
 
-    def units_per_yard(self, st: ClientState) -> float | None:
-        fwd = self._speed(st, "forward")
-        return fwd / self.cfg.run_speed if fwd else None
+    def _learn(self, slot: int, st: ClientState, key: str, speed: float) -> None:
+        k = self._key(slot, st, key)
+        old = self._speeds.get(k)
+        if old is None:
+            self._speeds[k], self._samples[k] = speed, 1
+            return
+        if not 0.5 <= speed / old <= 2.0:
+            pending = self._pending.pop(k, None)
+            if pending is not None and 0.5 <= speed / pending <= 2.0:  # twice in a row: the speed really changed
+                self._speeds[k], self._samples[k] = (speed + pending) / 2, 2
+                log.info("stack: slot %d %s speed re-measured (mounted, slowed, or a bad first reading)", slot, key)
+            else:
+                self._pending[k] = speed
+            return
+        self._pending.pop(k, None)
+        self._speeds[k] = old + (speed - old) * SPEED_SMOOTHING
+        self._samples[k] = self._samples.get(k, 0) + 1
+
+    def units_per_yard(self, st: ClientState, slot: int | None = None) -> float | None:
+        """Map units per yard. With `slot`: from that character's own speed (trusted or not, for stacking it).
+        Without: the zone's scale from trusted measurements of any character (for the distance guards),
+        or None if nothing is trusted on this map yet."""
+        if slot is not None:
+            fwd = self._speed(slot, st, "forward")
+            return fwd / self.cfg.run_speed if fwd else None
+        trusted = sorted(v for k, v in self._speeds.items()
+                         if k[1:3] == (st.map_id, st.map_level) and k[3] != "back" and self._samples.get(k, 0) >= 2)
+        return trusted[len(trusted) // 2] / self.cfg.run_speed if trusted else None
 
     def _too_far(self, me: ClientState, anchor: ClientState) -> str | None:
-        upy = self.units_per_yard(me)
+        upy = self.units_per_yard(me)  # trusted zone scale only
         if upy is None:
             return None
         yards = math.hypot(*self._offset(me, anchor)) / upy
@@ -227,7 +262,7 @@ class Stacker:
             held = self._press_frames(slot, key, frames, me, cancel)
             after = self._fresh(slot, cancel)
             turned = abs(wrap(after.facing - me.facing))
-            if turned > 0:
+            if turned > 0 and held >= MIN_LEARN_HOLD:
                 measured = turned / held
                 self._turn_rate = measured if self._turn_rate is None else \
                     self._turn_rate + (measured - self._turn_rate) * SPEED_SMOOTHING
@@ -256,7 +291,7 @@ class Stacker:
                 dx, dy = self._offset(me, target)
                 if why := self._too_far(me, target):
                     raise StackError(f"too far away ({why}, max {self.cfg.max_distance_yards:g} yd): use follow")
-                tol = self.distance_tolerance(me)
+                tol = self.distance_tolerance(slot, me)
                 if tol is not None and math.hypot(dx, dy) <= tol:
                     break
                 if abs(wrap(target.facing - me.facing)) > 2 * coarse:
@@ -269,9 +304,11 @@ class Stacker:
                 for comp, axis, pos_key, neg_key in ((along, (fx, fy), "forward", "back"),
                                                      (side, (rx, ry), "strafe_right", "strafe_left")):
                     key = pos_key if comp > 0 else neg_key
-                    speed = self._speed(me, key)
+                    speed = self._speed(slot, me, key)
                     frames = round(PROBE_HOLD * self._fps(me)) if speed is None else \
                         round(abs(comp) / speed * self._fps(me))
+                    if speed is not None and not self._trusted(slot, me, key):  # not sure yet: short steps
+                        frames = min(frames, round(UNTRUSTED_HOLD * self._fps(me)))
                     moves_possible.append((frames, comp, axis, key))
                 frames, comp, axis, key = max(moves_possible, key=lambda m: (m[0], abs(m[1])))
                 if frames == 0:
@@ -281,8 +318,8 @@ class Stacker:
                 after = self._fresh(slot, cancel)
                 ex, ey = (after.map_x - me.map_x) * self.cfg.map_aspect, after.map_y - me.map_y
                 moved = (ex * axis[0] + ey * axis[1]) * (1 if comp > 0 else -1)
-                if moved > 0:
-                    self._learn(me, key, moved / held)
+                if moved > 0 and held >= MIN_LEARN_HOLD:  # one frame off on a short press is a big error
+                    self._learn(slot, me, key, moved / held)
                 me = after
             else:
                 raise StackError("didn't get there in %d moves" % MAX_STEPS)
@@ -297,7 +334,7 @@ class Stacker:
             return self._result(slot, False, me, target, moves, str(e))
 
     def _result(self, slot, ok, me, target, moves, message) -> StackResult:
-        upy = self.units_per_yard(me)
+        upy = self.units_per_yard(me, slot)
         dist = math.hypot(*self._offset(me, target)) / upy if upy else None
         err = math.degrees(abs(wrap(target.facing - me.facing)))
         return StackResult(slot, ok, dist, err, moves, message, fps=me.fps)
