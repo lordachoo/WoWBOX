@@ -43,6 +43,10 @@ class MainWindow(QMainWindow):
         central = QWidget()
         root = QVBoxLayout(central)
         root.addLayout(self._build_toolbar())
+        self.banner = QLabel(wordWrap=True)  # automation paused / dry run / closed windows: seen from any tab
+        self.banner.setTextFormat(Qt.TextFormat.RichText)
+        self.banner.hide()
+        root.addWidget(self.banner)
         self.tabs = QTabWidget()
         self.tabs.addTab(self._build_clients_tab(), "Clients")
         self.tabs.addTab(self._build_routes_tab(), "Routes")
@@ -598,6 +602,36 @@ class MainWindow(QMainWindow):
         paused = f" - PAUSED: {e.paused_reason}" if e.paused_reason else ""
         self.auto_status.setText(f"Automation {state}{extra}{paused}")
 
+    def banner_lines(self) -> tuple[list[str], bool]:
+        """What the banner says, and whether any of it is serious (rules not running)."""
+        e, c = self.c.engine, self.c
+        name = lambda s: c.team.clients[s].name if s in c.team.clients else str(s)  # noqa: E731
+        lines, serious = [], False
+        if e.enabled and e.blocked:
+            stale = e.stale_slots()
+            lines.append(f"<b>Automation: {len(e.blocked)} rule(s) PAUSED</b> ({', '.join(sorted(e.blocked))}). "
+                         f"Can't read the bridge of {', '.join(name(s) for s in stale)} (minimized, covered, or "
+                         "the addon is off), so rules that check or send to it wait. The other rules keep running.")
+            serious = True
+        if e.enabled and e.dry_run:
+            lines.append("<b>Automation is in DRY RUN</b>: rules only log what they would do and send nothing. "
+                         "Untick Dry run to make them act.")
+            serious = True
+        if gone := c.missing_windows():
+            lines.append(f"Window closed: {', '.join(name(s) for s in gone)}. Left out of broadcasting and rules; "
+                         "Attach or Launch brings it back.")
+        return lines, serious
+
+    def refresh_banner(self) -> None:
+        lines, serious = self.banner_lines()
+        text = "<br>".join(lines)
+        if text != self.banner.text():
+            self.banner.setText(text)
+            self.banner.setStyleSheet("padding: 6px; border-radius: 4px; " + (
+                "background: #ffe0b2; color: #6d2c00; border: 1px solid #ef6c00;" if serious else
+                "background: #eceff1; color: #37474f; border: 1px solid #b0bec5;"))
+        self.banner.setVisible(bool(lines))
+
     # ------------------------------------------------------------------ periodic
     def refresh(self) -> None:
         on = self.c.router.enabled
@@ -620,6 +654,7 @@ class MainWindow(QMainWindow):
                 cb.blockSignals(False)
         if self.layout_combo.currentText() != self.c.layout.current:
             self.layout_combo.setCurrentText(self.c.layout.current)
+        self.refresh_banner()
         self.refresh_clients()
         self.refresh_automation()
         self.refresh_macros()

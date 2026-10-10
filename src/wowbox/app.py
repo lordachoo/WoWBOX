@@ -634,7 +634,7 @@ class Controller(QObject):
         chat = "PAUSED (typing)" if self.chatguard.paused(active) else "ok"
         auto = "ON" + (" dry-run" if self.engine.dry_run else "") if self.engine.enabled else "OFF"
         if self.engine.paused_reason:
-            auto += f" paused: {self.engine.paused_reason}"
+            auto += f" ({self.engine.paused_reason})"
         rehooks = getattr(self.input, "rehook_count", 0)
         return (f"Broadcast {'ON' if self.router.enabled else 'OFF'} | active: "
                 f"{self.team.clients[active].name if active else '-'} | chat guard: {chat} | automation: {auto}"

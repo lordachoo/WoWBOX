@@ -151,7 +151,7 @@ automation_options:
   enabled_on_start: false       # automation always starts OFF unless you change this
   dry_run: true                 # log what would be sent without sending
   tick_hz: 10
-  pause_on_stale_bridge: true   # pause everything if any client's bridge goes stale
+  pause_on_stale_bridge: true   # a rule waits while a client it checks or sends to can't be read
 
 memread:                        # optional, read-only ReadProcessMemory. Off by default.
   enabled: false

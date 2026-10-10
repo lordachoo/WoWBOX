@@ -139,7 +139,9 @@ class AutomationEngine:
         self.bridge_enabled = bridge_enabled
         self.enabled = options.enabled_on_start
         self.dry_run = options.dry_run
-        self.paused_reason: str | None = None
+        self.paused_reason: str | None = None  # summary of what's paused, for the window's banner
+        self.blocked: dict[str, str] = {}  # rule name -> why it's paused right now
+        self._gone: list[int] = []
         self.on_event: Callable[[str], None] = lambda msg: None
         self.on_macro: Callable[[str], None] = lambda name: log.warning("no macro runner for %r", name)
         self._chat_seen: dict[tuple, float] = {}
@@ -174,8 +176,8 @@ class AutomationEngine:
         cooling = r.cooldown - (now - rt.last_fired) if rt.last_fired is not None and r.cooldown else 0.0
         if not self.enabled:
             state = "automation OFF"
-        elif self.paused_reason:
-            state = f"paused: {self.paused_reason}"
+        elif why := self.blocked_reason(rt):
+            state = f"paused: {why}"
         elif cooling > 0:
             state = f"cooldown {fmt_left(cooling)}"
         else:
@@ -218,30 +220,68 @@ class AutomationEngine:
         self.set_enabled(False)
 
     # ------------------------------------------------------------------
-    def _check_pause(self) -> str | None:
-        missing = self.source.missing_windows()
-        if missing:
-            return f"window lost for slot(s) {missing}"
-        if self.bridge_enabled and self.options.pause_on_stale_bridge:
-            bad = [s for s, st in self.source.states().items() if st is None or st.stale]
-            if bad:
-                return f"bridge stale/missing for slot(s) {bad}"
-        return None
+    def stale_slots(self) -> list[int]:
+        """Clients whose bridge can't be read (minimized, covered, addon off). With pause_on_stale_bridge, rules
+        that send to or check one of these wait: WoWBox can't see whether you're typing there."""
+        if not (self.bridge_enabled and self.options.pause_on_stale_bridge):
+            return []
+        return sorted(s for s, st in self.source.states().items() if st is None or st.stale)
+
+    def involved_slots(self, rt: RuleRuntime) -> set[int]:
+        """The clients a rule checks or sends to (a macro step may send anywhere: all of them)."""
+        r = rt.rule
+        slots: set[int] = set()
+        if r.when is not None:
+            if isinstance(r.when.slot, int):
+                slots.add(r.when.slot)
+            elif isinstance(r.when.slot, list):
+                slots.update(r.when.slot)
+        for step in rt.steps:
+            if isinstance(step, (TypeStep, SendStep)):
+                slots.update(self.source.slots_for(step.to))
+            elif isinstance(step, MacroStep):
+                slots.update(self.source.states())
+        return slots
+
+    def blocked_reason(self, rt: RuleRuntime, stale: list[int] | None = None) -> str | None:
+        stale = self.stale_slots() if stale is None else stale
+        bad = sorted(set(stale) & self.involved_slots(rt)) if stale else []
+        return f"can't read the bridge of slot(s) {bad}" if bad else None
+
+    def _update_blocked(self) -> list[int]:
+        """Work out which rules are paused now, and log the changes."""
+        stale = self.stale_slots()
+        blocked = {}
+        for rt in self.rules:
+            if rt.enabled and (why := self.blocked_reason(rt, stale)):
+                blocked[rt.rule.name] = why
+        for name, why in blocked.items():
+            if self.blocked.get(name) != why:
+                self._event(f"rule {name!r} paused: {why}")
+        for name in self.blocked.keys() - blocked.keys():
+            self._event(f"rule {name!r} resumed")
+        self.blocked = blocked
+        gone = self.source.missing_windows()
+        if gone != self._gone:
+            if set(gone) - set(self._gone):
+                self._event(f"window closed for slot(s) {sorted(set(gone) - set(self._gone))}: "
+                            "rules leave it out and keep running for the others")
+            self._gone = gone
+        self.paused_reason = (f"{len(blocked)} rule(s) paused: can't read the bridge of slot(s) {stale}"
+                              if blocked else None)
+        return stale
 
     def tick(self, now: float) -> None:
         if not self.enabled:
             self.paused_reason = None
+            self.blocked = {}
             return
-        reason = self._check_pause()
-        if reason != self.paused_reason:
-            self.paused_reason = reason
-            self._event(f"automation paused: {reason}" if reason else "automation resumed")
-        if reason:
-            for rt in self.rules:
-                rt.running_step = None
-            return
+        self._update_blocked()
         states = self.source.states()
         for rt in self.rules:
+            if rt.rule.name in self.blocked:
+                rt.running_step = None
+                continue
             if rt.running_step is not None:
                 self._advance(rt, now)
                 continue
@@ -274,12 +314,13 @@ class AutomationEngine:
                       and self._chat_matches(rt.rule.chat, slot, ev)]
         if not candidates:
             return
-        if self.paused_reason:
-            self._event(f"chat from {ev.sender} ignored: automation paused ({self.paused_reason})")
-            return
         self._chat_seen = {k: t for k, t in self._chat_seen.items() if now - t < CHAT_DEDUPE}
         values = {"sender": ev.sender, "message": ev.text, "channel": ev.channel, "listener": listener}
+        stale = self.stale_slots()
         for rt in candidates:
+            if why := self.blocked_reason(rt, stale):
+                self._event(f"rule {rt.rule.name!r}: chat from {ev.sender} ignored, paused ({why})")
+                continue
             key = (rt.rule.name, ev.channel, ev.sender.lower(), ev.text)
             if key in self._chat_seen:
                 continue

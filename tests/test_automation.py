@@ -25,6 +25,11 @@ class Source:
     def missing_windows(self):
         return self.missing
 
+    def slots_for(self, target):
+        if isinstance(target, list):
+            return sorted(set(target) & set(self.st))
+        return {"all": sorted(self.st), "leader": [1]}.get(target, [])
+
 
 def engine(rules, **opts):
     cfg = AppConfig.model_validate({"automation": rules,
@@ -80,19 +85,36 @@ def test_dry_run_sends_nothing():
     assert any("dry run" in m for m in events)
 
 
-def test_pauses_on_stale_bridge_and_lost_window():
-    e, sender, src = engine([DRINK])
+def test_stale_bridge_pauses_only_the_rules_that_touch_it():
+    leader_rule = {"name": "leader", "every": "10s", "do": {"send": "F1", "to": "leader"}}
+    e, sender, src = engine([DRINK, leader_rule])
     src.st[3] = ClientState(power_pct=10)
     src.st[1] = ClientState(stale=True)
     e.tick(0)
-    assert sender.sent == [] and "stale" in e.paused_reason
+    assert sender.sent == [("Ctrl+9", [3])]  # drink only touches slot 3: it runs
+    assert e.blocked == {"leader": "can't read the bridge of slot(s) [1]"} and "1 rule(s) paused" in e.paused_reason
+    assert e.status(e.rules[1], 0).state == "paused: can't read the bridge of slot(s) [1]"
+    e.tick(11)
+    assert len(sender.sent) == 1  # the timer waits while slot 1 is unreadable
     src.st[1] = ClientState()
-    src.missing = [2]
-    e.tick(1)
-    assert sender.sent == [] and "window lost" in e.paused_reason
-    src.missing = []
-    e.tick(2)
-    assert e.paused_reason is None and len(sender.sent) == 1
+    e.tick(12)
+    assert e.blocked == {} and e.paused_reason is None
+
+
+def test_closed_window_doesnt_pause_anything():
+    e, sender, src = engine([DRINK])
+    src.st[3] = ClientState(power_pct=10)
+    src.missing = [2]  # you closed slot 2 on purpose
+    e.tick(0)
+    assert sender.sent == [("Ctrl+9", [3])] and e.paused_reason is None
+
+
+def test_stale_pause_can_be_turned_off():
+    e, sender, src = engine([DRINK], pause_on_stale_bridge=False)
+    src.st[3] = ClientState(power_pct=10)
+    src.st[1] = ClientState(stale=True)
+    e.tick(0)
+    assert e.blocked == {} and len(sender.sent) == 1
 
 
 def test_kill_switch():

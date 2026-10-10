@@ -811,7 +811,9 @@ Long triggers and actions are cut off with "…". Hover over them to see all of 
 - `enabled: false` keeps a rule in the file but switched off.
 - A rule that's still running its sequence won't start again.
 - **Safety:**
-  - Automation pauses itself when any client's bridge goes stale or a window disappears (`pause_on_stale_bridge`).
+  - **Pausing is per rule.** With `pause_on_stale_bridge` (on by default), a client whose bridge can't be read (minimized, covered, addon off) pauses only the rules that check or send to it, because WoWBox can't tell whether you're typing there. Every other rule keeps running.
+  - **A closed window** pauses nothing: targets like `all` simply leave it out.
+  - **The banner** under the toolbar shows from any tab when rules are paused, when Dry run is on (rules log but send nothing), or when a window was closed.
   - Key presses skip clients that are typing.
   - Every firing is logged.
 
