@@ -241,3 +241,23 @@ def test_from_team_means_your_own_characters():
     e.on_chat(3, whisper(sender="Randomfriend", text="heal pls"), now=10)  # named
     e.on_chat(3, whisper(sender="Randompug", text="heal pls"), now=20)     # a stranger
     assert [t for k, t, _ in sender.sent] == ["/cast [@gnope] Healing Wave", "/cast [@Randomfriend] Healing Wave"]
+
+
+@pytest.mark.parametrize("text,fired", [
+    ("light heal pls", ["light"]),
+    ("chain heals!", ["chain-heals"]),
+    ("chain heal", ["chain"]),
+    ("heals", ["heals"]),
+    ("heal me", ["heal"]),
+    ("paladin buff", ["buff-anyone"]),  # no overlap with the heal words: unaffected
+])
+def test_most_specific_keyword_wins(text, fired):
+    def rule(name, word):
+        return {"name": name, "chat": {"contains": [word], "heard_by": "all"},
+                "do": {"type": f"/say {name}", "to": "Kunth"}}
+    rules = [rule("heal", "heal"), rule("heals", "heals"), rule("light", "light heal"),
+             rule("chain", "chain heal"), rule("chain-heals", "chain heals"), rule("buff-anyone", "buff")]
+    e, sender = engine(rules)
+    for slot in (1, 2, 3):
+        e.on_chat(slot, whisper(text=text), now=0)
+    assert [t[1].removeprefix("/say ") for t in sender.sent] == fired

@@ -86,6 +86,12 @@ def condition_report(cond: Condition, states: dict[int, ClientState | None], pre
     return (all(hits) if cond.slot == "all" else any(hits)), per
 
 
+def matched_word(trig: ChatTrigger, text: str) -> str | None:
+    """The longest of the trigger's words found in the line (lower case), or None."""
+    hits = [w.lower() for w in trig.contains if w.lower() in text.lower()]
+    return max(hits, key=len) if hits else None
+
+
 def fmt_left(seconds: float) -> str:
     """12 -> '12s', 725 -> '12m 05s', 3725 -> '1h 02m'"""
     s = max(0, int(round(seconds)))
@@ -309,9 +315,10 @@ class AutomationEngine:
         """A client heard a chat line (from its BoxBridge). Fires matching `chat:` rules."""
         if not self.enabled:
             return
-        candidates = [rt for rt in self.rules if rt.enabled and rt.rule.chat is not None
-                      and rt.rule.name not in self.paused_rules
-                      and self._chat_matches(rt.rule.chat, slot, ev)]
+        matching = [rt for rt in self.rules if rt.enabled and rt.rule.chat is not None
+                    and rt.rule.name not in self.paused_rules and self._line_matches(rt.rule.chat, ev)]
+        candidates = [rt for rt in self.most_specific(matching, ev.text)
+                      if slot in self.source.slots_for(rt.rule.chat.heard_by)]
         if not candidates:
             return
         self._chat_seen = {k: t for k, t in self._chat_seen.items() if now - t < CHAT_DEDUPE}
@@ -347,14 +354,22 @@ class AutomationEngine:
         fn = getattr(self.source, "character_names", None)
         return {n.lower() for n in fn()} if fn else set()
 
-    def _chat_matches(self, trig: ChatTrigger, slot: int, ev: ChatEvent) -> bool:
+    def _line_matches(self, trig: ChatTrigger, ev: ChatEvent) -> bool:
+        """Channel, sender and words match (who heard it is checked separately)."""
         if "any" not in trig.channel and ev.channel not in trig.channel:
             return False
         if trig.sender and not self._sender_ok(trig.sender, ev.sender):
             return False
-        if trig.contains and not any(w.lower() in ev.text.lower() for w in trig.contains):
-            return False
-        return slot in self.source.slots_for(trig.heard_by)
+        return not trig.contains or matched_word(trig, ev.text) is not None
+
+    @staticmethod
+    def most_specific(rules: list[RuleRuntime], text: str) -> list[RuleRuntime]:
+        """Most specific keyword wins: drop a rule whose matched word is part of a longer word another rule
+        matched, so "light heal" doesn't also fire the "heal" rule. Rules without words are kept."""
+        words = {rt.rule.name: matched_word(rt.rule.chat, text) for rt in rules}
+        return [rt for rt in rules
+                if (w := words[rt.rule.name]) is None
+                or not any(o is not None and len(o) > len(w) and w in o for o in words.values())]
 
     # ------------------------------------------------------------------ running
     def _fire(self, rt: RuleRuntime, now: float, steps: list[Step] | None = None, why: str = "") -> None:

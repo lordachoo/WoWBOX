@@ -775,7 +775,16 @@ automation:
 - **`do:`** is the same step list as a macro. `{sender}` is filled in with the whisperer's name.
 - **`[@{sender}]`** casts on the whisperer without changing your target. It works for party and raid members. For anyone else, use `/target {sender}` + `/cast …` + `/targetlasttarget`, as in `buff-bot`.
 - **`cooldown:`** stops one person from spamming the rule. A rule that's still running its steps also won't start again.
-- **Every matching rule fires.** Keywords match anywhere in the text, so `heal` also matches "bigheal" or "chain heal". Pick keywords that don't contain each other (here `heal` and `chain`), and remember that a whisper containing both words fires both rules.
+- **The most specific keyword wins.** Keywords match anywhere in the text, so `heal` is also inside "light heal" and "chain heals". When one rule's matched keyword is part of a longer keyword another rule matched, only the longer one fires:
+
+  | Line | Rules with these keywords: `heal`, `heals`, `light heal`, `chain heal`, `chain heals` |
+  |---|---|
+  | "light heal pls" | only `light heal` |
+  | "chain heals" | only `chain heals` |
+  | "heals" | only `heals` |
+  | "heal me" | only `heal` |
+
+  Keywords that don't overlap still all fire: a line with both `heal` and `buff` fires a heal rule and a buff rule.
 
 **Turning it on and testing**
 1. Paste the rules under `automation:` in `team.yaml`, save, and press **Reload config**. They show up in the **Automation** tab.
