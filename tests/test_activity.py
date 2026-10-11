@@ -149,3 +149,28 @@ def test_controller_is_a_working_state_source_for_the_engine(qapp):
     c.engine.load([rule])
     c.engine.status(c.engine.rules[0], time.monotonic())  # what the window calls 4 times a second
     shutil.rmtree(tmp)
+
+
+def test_bb_commands_show_in_the_activity_feed(qapp):
+    from pathlib import Path
+    import shutil
+    import tempfile
+    from wowbox.app import Controller
+    from wowbox.config import load_config
+    from wowbox.platform.fake import FakeCapture, FakeInput, FakeWindows
+    tmp = Path(tempfile.mkdtemp())
+    shutil.copy(Path(__file__).parent.parent / "config" / "team.example.yaml", tmp / "team.yaml")
+    windows = FakeWindows()
+    c = Controller(tmp / "team.yaml", load_config(tmp / "team.yaml"), windows, FakeInput(), lambda: FakeCapture())
+    for slot in (1, 2, 3):
+        windows.add(0x100 * slot, pid=slot)
+        cl = c.team.clients[slot]
+        cl.hwnd, cl.pid, cl.alive, cl.state = 0x100 * slot, slot, True, ClientState(name=f"C{slot}")
+    c.cfg.bridge.commands = True
+    c.team_command(1, "all", "/reload")
+    c.team_command(1, "nobody", "/reload")
+    got = [(a.source, a.kind, a.text, a.slots) for a in c.activity.items()]
+    assert got[0][:3] == ("/bb", "fired", "all: /reload") and set(got[0][3]) == {1, 2, 3}
+    assert got[1][:2] == ("/bb", "skipped") and "no client matches" in got[1][2]
+    assert c.activity.last_for(2).text == "all: /reload"  # counts as the character's last action
+    shutil.rmtree(tmp)

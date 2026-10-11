@@ -16,7 +16,7 @@ FEED_SIZE = 300
 class Activity:
     at: float  # wall clock, for the time column
     mono: float  # monotonic, for "2s ago"
-    source: str  # "rule" or "macro"
+    source: str  # "rule", "macro" or "/bb"
     name: str  # the rule or macro
     text: str  # what happened
     slots: list[int] = field(default_factory=list)  # the characters it went to, if any
@@ -45,11 +45,12 @@ class ActivityFeed:
         self._lock = threading.Lock()
         self.version = 0  # bumps on every change, so the UI can skip redraws
 
-    def add(self, source: str, name: str, text: str, slots: list[int] | None = None) -> None:
-        a = Activity(time.time(), time.monotonic(), source, name, text.strip(), list(slots or []), kind_of(text.strip()))
+    def add(self, source: str, name: str, text: str, slots: list[int] | None = None, kind: str | None = None) -> None:
+        a = Activity(time.time(), time.monotonic(), source, name, text.strip(), list(slots or []),
+                     kind or kind_of(text.strip()))
         with self._lock:
             self._items.append(a)
-            if a.slots and a.kind == "step":
+            if a.slots and (a.kind == "step" or a.source == "/bb" and a.kind == "fired"):
                 for s in a.slots:
                     self._last[s] = a
             self.version += 1

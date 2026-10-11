@@ -194,7 +194,7 @@ On start, WoWBox attaches to every running `Wow.exe` window. It puts each window
 | **Routes** | The route table. A change takes effect as soon as you finish editing a cell. A bad row turns red and isn't used. **Save config** keeps the changes after a restart. |
 | **Macros** | Your macros with their hotkeys, whether they're running, and their steps. **New / Edit / Duplicate / Delete** open the macro editor (double-click edits too). Run/Stop, Stop all. |
 | **Automation** | Every rule with its trigger and actions, plus live columns: **Status** (waiting, cooldown 8s, running step 2/4, disabled, automation OFF), **Next** (timers get a countdown bar, e.g. *in 12m 05s*; state rules say whether the condition is true now and why not; chat rules wait for a line), **Last fired** and **Fired** (count). **New / Edit / Duplicate / Delete** open the rule editor (double-click edits too). The *On* box enables or disables a rule, and the change is saved at once. |
-| **Activity** | The live dashboard of rules and macros: each character's state and last action, the live queue, and a feed of recent activity. Section 13, *The Activity tab*. |
+| **Activity** | The live dashboard of rules, macros and `/bb` commands: each character's state and last action, the live queue, and a feed of recent activity. Section 13, *The Activity tab*. |
 | **Log** | Everything WoWBox does: keys typed, rules fired, chat lines seen, `/bb` commands. The same goes to `logs\wowbox.log`. |
 
 A tray icon offers the same switches. Its dot is green while broadcasting and red while not, with a yellow ring while automation is on. Closing the window quits WoWBox.
@@ -899,9 +899,10 @@ A live dashboard of everything rules and macros do. It updates four times a seco
   The rule holding a character's turn is listed first among the waiting ones, and a rule's priority is shown next to its name. Typed lines waiting for you to stop typing in a window are listed too.
 - **What ran** (right, beside *Now*): the last 300 events, newest first, with a live **Ago** column (*4s ago*, *2m 10s ago*) and the time.
   - **What's in it:** rules firing (with the chat line that triggered them, the steps and the characters they act on), macros starting (with their steps) and finishing, requests queued, and anything skipped or expired.
+  - **`/bb` too:** every team command (who typed it, to whom, what, e.g. *from Tinkerdawn · all: /reload*), `/bb stack/follow/stay/mirror`, and how each character's stack ended (*stacked*, *too far away*, *facing matched only*). A `/bb` command also counts as that character's last action in the Characters table.
   - **Each step** (off by default) adds every single line or key sent and to whom.
   - **Colours:** fired is green, queued blue, skipped red, done grey.
-  - **Filters:** tick boxes show or hide **Rules**, **Macros**, **Each step** and **Queue and skips**. **Clear** empties the list. Hover over a cut-off line to read all of it. **Timers start when automation is turned on:** a timer never fires the moment you switch automation on, even if it came due while automation was off.
+  - **Filters:** tick boxes show or hide **Rules**, **Macros**, **/bb**, **Each step** and **Queue and skips**. **Clear** empties the list. Hover over a cut-off line to read all of it. **Timers start when automation is turned on:** a timer never fires the moment you switch automation on, even if it came due while automation was off.
 
 ### Common to all rules
 

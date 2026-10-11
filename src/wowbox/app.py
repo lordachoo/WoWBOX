@@ -515,6 +515,8 @@ class Controller(QObject):
             facing = f"{r.facing_error_deg:.0f}°" if r.facing_error_deg is not None else "?"
             (log.info if r.ok else log.warning)("stack %s: %s (%s off, facing %s off, %d moves)",
                                                  name, r.message, where, facing, r.moves)
+            self.activity.add("/bb", "stack", f"{name}: {r.message} ({where} off, facing {facing} off, "
+                              f"{r.moves} moves)", [r.slot], kind="done" if r.ok else "skipped")
         self.sig_changed.emit()
 
     def wowbox_action(self, origin: int, action: str) -> None:
@@ -534,18 +536,22 @@ class Controller(QObject):
 
     def team_command(self, origin: int, who: str, text: str) -> list[int]:
         """`/bb all|others|to <who> <command>` typed in the client in slot `origin`: type it in the clients meant."""
+        sender = self.team.clients[origin].name if origin in self.team.clients else str(origin)
         if not self.cfg.bridge.commands:
             log.warning("/bb %s %s ignored: bridge.commands is off", who, text)
+            self.activity.add("/bb", f"from {sender}", f"{who} {text}: ignored, bridge.commands is off", kind="skipped")
             return []
         if who == "@wowbox":
+            self.activity.add("/bb", f"from {sender}", f"{text} (WoWBox action)", [origin], kind="fired")
             self.wowbox_action(origin, text)
             return []
         slots = self.team.command_slots(who, origin)
-        sender = self.team.clients[origin].name if origin in self.team.clients else str(origin)
         if not slots:
             log.warning("/bb from %s: no client matches %r (%s)", sender, who, text)
+            self.activity.add("/bb", f"from {sender}", f"{who} {text}: no client matches {who!r}", kind="skipped")
             return []
         log.info("/bb from %s -> %s %s: %s", sender, who, slots, text)
+        self.activity.add("/bb", f"from {sender}", f"{who}: {text}", slots, kind="fired")
         self.commands.send(text, slots, origin)
         return slots
 

@@ -77,11 +77,12 @@ class ActivityTab(QWidget):
         fh.setSectionResizeMode(FEED_COLS.index("What"), QHeaderView.Stretch)
         self.show_rules = QCheckBox("Rules", checked=True)
         self.show_macros = QCheckBox("Macros", checked=True)
+        self.show_bb = QCheckBox("/bb", checked=True)
         self.show_steps = QCheckBox("Each step", checked=False)
         self.show_queue = QCheckBox("Queue and skips", checked=True)
         filters = QHBoxLayout()
         filters.addWidget(QLabel("<b>What ran</b> (newest first) · show:"))
-        for cb in (self.show_rules, self.show_macros, self.show_steps, self.show_queue):
+        for cb in (self.show_rules, self.show_macros, self.show_bb, self.show_steps, self.show_queue):
             cb.toggled.connect(lambda _: self.refresh(force=True))
             filters.addWidget(cb)
         filters.addStretch(1)
@@ -219,6 +220,8 @@ class ActivityTab(QWidget):
         if a.source == "rule" and not self.show_rules.isChecked():
             return False
         if a.source == "macro" and not self.show_macros.isChecked():
+            return False
+        if a.source == "/bb" and not self.show_bb.isChecked():
             return False
         if a.kind == "step" and not self.show_steps.isChecked():
             return False
