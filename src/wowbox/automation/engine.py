@@ -62,7 +62,8 @@ OP_WORDS = {operator.eq: "=", operator.ne: "≠", operator.lt: "<", operator.le:
 
 
 def condition_report(cond: Condition, states: dict[int, ClientState | None], preds: list | None = None,
-                     skip_dead: bool = True) -> tuple[bool, list[tuple[int, bool, str]]]:
+                     skip_dead: bool = True, far: dict[int, str] | None = None
+                     ) -> tuple[bool, list[tuple[int, bool, str]]]:
     """Whether `cond` matches now, and per character: (slot, matches, why not). `slot: all` needs every
     listed character to match, anything else any one of them."""
     preds = compile_condition(cond) if preds is None else preds
@@ -81,6 +82,9 @@ def condition_report(cond: Condition, states: dict[int, ClientState | None], pre
             continue
         if skip_dead and not asks_about_death and (st.dead or st.ghost):
             per.append((slot, False, "dead"))
+            continue
+        if far and slot in far:
+            per.append((slot, False, far[slot]))
             continue
         failed = next(((fld, fn, val) for fld, fn, val in preds if not fn(getattr(st, fld), val)), None)
         if failed is None:
@@ -247,15 +251,17 @@ class AutomationEngine:
         elif r.chat is not None:
             nxt = "on a matching chat line"
             if r.when is not None:
-                ok, _ = condition_report(r.when, self.source.states(), rt.preds, self.options.skip_dead)
+                ok, _, _ = self._check(rt, self.source.states())
                 nxt += " (condition true now)" if ok else " (but the condition is false now)"
         else:
-            ok, per = condition_report(r.when, self.source.states(), rt.preds, self.options.skip_dead)
+            ok, per, values = self._check(rt, self.source.states())
             ready = ok
             if ok:
                 nxt = "now: condition is true" if cooling <= 0 else "after the cooldown: condition is true"
             else:
-                why = next((w for _, m, w in per if not m), "")
+                far = [f"{self._names([s])} {w}" for s, m, w in per if not m and w.startswith("too far")]
+                misses = [w for _, m, w in per if not m]  # "too far" explains a hurt character not being healed
+                why = far[0] if far else misses[0] if misses else ""
                 nxt = f"when the condition is true ({why})" if why else "when the condition is true"
         return RuleStatus(state, nxt, progress, last, ready)
 
@@ -391,13 +397,58 @@ class AutomationEngine:
                 if now < rt.next_due:
                     continue
                 rt.next_due = now + rt.rule.every
-            elif not self._matches(rt, states):
+            else:
+                ok, _, values = self._check(rt, states)
+                if not ok:
+                    continue
+                self._fire(rt, now, substitute(rt.steps, values) if values else None)
                 continue
             self._fire(rt, now)
 
     def _matches(self, rt: RuleRuntime, states: dict[int, ClientState | None]) -> bool:
+        return self._check(rt, states)[0]
+
+    def _check(self, rt: RuleRuntime, states: dict[int, ClientState | None]
+               ) -> tuple[bool, list[tuple[int, bool, str]], dict[str, str]]:
+        """The rule's condition: (matches, per character, values for {name} {slot} {class} {health} {power}).
+        Dead characters and those far from where the rule acts don't count (skip_dead, skip_far)."""
         assert rt.rule.when is not None
-        return condition_report(rt.rule.when, states, rt.preds, self.options.skip_dead)[0]
+        ok, per = condition_report(rt.rule.when, states, rt.preds, self.options.skip_dead, self._far(rt, states))
+        return ok, per, self._matched_values(rt, per, states) if ok else {}
+
+    def _far(self, rt: RuleRuntime, states: dict[int, ClientState | None]) -> dict[int, str]:
+        """Characters too far from every character the rule acts on: slot -> why (e.g. "in another zone")."""
+        apart = getattr(self.source, "apart", None)
+        if not self.options.skip_far or apart is None:
+            return {}
+        targets = sorted(self._send_slots(rt))
+        if not targets:
+            return {}
+        far = {}
+        for s in states:
+            if s in targets:
+                continue
+            whys = [apart(s, t) for t in targets]
+            if all(whys):
+                far[s] = f"too far from {self._names(targets)}: {whys[0]}"
+        return far
+
+    def _matched_values(self, rt: RuleRuntime, per: list[tuple[int, bool, str]],
+                        states: dict[int, ClientState | None]) -> dict[str, str]:
+        """The character the condition matched, for {name} and friends. Several: the lowest health (or power,
+        if the condition is about power), else the first."""
+        matched = [s for s, m, _ in per if m and states.get(s) is not None]
+        if not matched:
+            return {}
+        fields = {fld for fld, _, _ in rt.preds}
+        if any(f.startswith("health") for f in fields):
+            matched.sort(key=lambda s: states[s].health_pct)
+        elif any(f.startswith("power") for f in fields):
+            matched.sort(key=lambda s: states[s].power_pct)
+        s = matched[0]
+        st = states[s]
+        return {"name": st.name or self._names([s]), "slot": str(s), "class": st.class_token,
+                "health": f"{st.health_pct:.0f}", "power": f"{st.power_pct:.0f}"}
 
     # ------------------------------------------------------------------ chat
     def on_chat(self, slot: int, ev: ChatEvent, now: float, listener: str = "") -> None:
@@ -428,8 +479,11 @@ class AutomationEngine:
             if busy:
                 self._queue(rt, _Request(ev.sender, steps, why, now), busy)
                 continue
-            if rt.rule.when is not None and not self._matches(rt, self.source.states()):
-                continue
+            if rt.rule.when is not None:
+                ok, _, matched = self._check(rt, self.source.states())
+                if not ok:
+                    continue
+                steps = substitute(steps, matched) if matched else steps
             self._fire(rt, now, steps, why, ev.sender)
 
     # ------------------------------------------------------------------ chat request queue
@@ -465,10 +519,14 @@ class AutomationEngine:
                 self._event(f"rule {rt.rule.name!r}: {req.sender}'s request expired after "
                             f"{fmt_left(self.options.chat_queue_ttl)} in the queue")
                 continue
-            if rt.rule.when is not None and not self._matches(rt, states):
-                self._event(f"rule {rt.rule.name!r}: {req.sender}'s request dropped, the condition is false now")
-                continue
-            self._fire(rt, now, req.steps, f"queued {fmt_left(now - req.queued_at)}, {req.why}", req.sender)
+            steps = req.steps
+            if rt.rule.when is not None:
+                ok, _, matched = self._check(rt, states)
+                if not ok:
+                    self._event(f"rule {rt.rule.name!r}: {req.sender}'s request dropped, the condition is false now")
+                    continue
+                steps = substitute(steps, matched) if matched else steps
+            self._fire(rt, now, steps, f"queued {fmt_left(now - req.queued_at)}, {req.why}", req.sender)
             return
 
     def _sender_ok(self, allowed: list[str], sender: str) -> bool:

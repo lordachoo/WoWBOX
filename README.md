@@ -685,6 +685,25 @@ automation:
 - **`slot`:** a number, a list, `any` (the default) or `all`.
 - **Every other key** is a bridge field. Add `_lt`, `_lte`, `_gt`, `_gte` or `_ne` to compare.
 - **Fields:** `health_pct`, `power_pct`, `power_type`, `target_exists`, `target_hostile`, `target_dead`, `target_is_player`, `target_in_combat`, `target_health_pct`, `combat`, `resting`, `in_party`, `in_raid`, `typing`, `chat_open`, `casting`, `channeling`, `mounted`, `dead`, `ghost`, `afk`, `following`, `level`, `position_ok`, `map_x`, `map_y`, `facing`, `map_id`, `fps`.
+- **Who matched: `{name}`.** When the condition matches, the steps can use the character it matched:
+
+  | Placeholder | Filled with |
+  |---|---|
+  | `{name}` | the matched character's name, e.g. `Gnope` |
+  | `{slot}` | its slot number |
+  | `{class}` | its class, e.g. `WARLOCK` |
+  | `{health}`, `{power}` | its health and power % (for messages like `/p {name} is at {health}%`) |
+
+  If several characters match, it's the one with the lowest health (or lowest power, if the condition is about power), otherwise the first. Example: heal whoever is low, in one rule:
+  ```yaml
+  - name: heal-whoever-is-low
+    when: { slot: any, health_pct_lt: 50 }
+    do: { type: "/cast [@{name}] Healing Wave", to: "class:SHAMAN" }
+    cooldown: 3s
+  ```
+  The same placeholders work in a chat rule that also has a `when:`.
+- **Only characters near the action count** (`skip_far`, on by default). A character in another zone, or farther than `follow.mirror_max_distance_yards` (40 yd) from every character the rule acts on, is ignored by that rule's condition. Someone hurt in another zone doesn't make Kunth chain-heal forever. The Next column says so, e.g. *Gnope too far from Kunth: in another zone*. Inside instances without map coordinates only the zone is compared.
+- **Dead characters don't count either** (`skip_dead`), unless the condition asks about `dead` itself.
 
 ### Timers: `every:`
 
@@ -1114,7 +1133,7 @@ Everything lives in `config\team.yaml`. The exe uses `config\team.yaml` next to 
 | `bridge` | `enabled`, `hz` (10), `block_size` (8, match `/bb size`), `method` (auto / mss / dxcam / printwindow), `stale_after` (1.5s), `commands` (true) |
 | `macros` | section 12. Kept in `config/macros.yaml` once you've saved from the macro editor. |
 | `automation` | section 13. Kept in `config/automation.yaml` once you've saved from the rule editor. |
-| `automation_options` | `enabled_on_start` (false), `dry_run` (true), `tick_hz` (10), `pause_on_stale_bridge` (true), `chat_queue` (5), `chat_queue_ttl` (60 s), `rule_gap` (1.5 s), `wait_for_casts` (true), `cast_wait_max` (10 s), `skip_dead` (true) |
+| `automation_options` | `enabled_on_start` (false), `dry_run` (true), `tick_hz` (10), `pause_on_stale_bridge` (true), `chat_queue` (5), `chat_queue_ttl` (60 s), `rule_gap` (1.5 s), `wait_for_casts` (true), `cast_wait_max` (10 s), `skip_dead` (true), `skip_far` (true) |
 | `memread` | optional read-only memory reader: `enabled` (false), `hz`, `fields: {name: {address, module, offsets, type}}`. No addresses ship with WoWBox; you supply and verify them. |
 | `ui` | `overlay: true` shows the overlay on start |
 

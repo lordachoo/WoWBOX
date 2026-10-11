@@ -160,6 +160,7 @@ automation_options:
   wait_for_casts: true          # ...and wait for its current cast/channel to finish (at most cast_wait_max)
   cast_wait_max: 10s
   skip_dead: true               # dead characters don't match conditions and get no steps
+  skip_far: true                # characters in another zone / out of range don't count for a rule's condition
 
 memread:                        # optional, read-only ReadProcessMemory. Off by default.
   enabled: false

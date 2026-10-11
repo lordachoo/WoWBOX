@@ -91,6 +91,13 @@ Needs `/reload` on every client.
 
 ### Part A: placeholders for the matched character (your own characters, no addon change)
 
+**Partly done:**
+- `{name}`, `{slot}`, `{class}`, `{health}` and `{power}` work in state rules, and in chat rules with a `when:`.
+- When several characters match, the lowest health (or power) is picked.
+- Characters too far away or dead don't match (`skip_far`, `skip_dead`).
+
+**Still to do:** the `pick:` option, `cooldown_per: character` and `to: matched`.
+
 ```yaml
 - name: heal-whoever-is-low
   when: { slot: any, health_pct_lt: 30 }

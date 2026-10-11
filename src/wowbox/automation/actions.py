@@ -42,7 +42,7 @@ def safe_values(values: dict[str, str]) -> dict[str, str]:
     loses control characters and WoW escape codes and can't start a slash command."""
     out = {}
     for k, v in values.items():
-        if k in ("sender", "listener"):
+        if k in ("sender", "listener", "name"):
             out[k] = _NAME_UNSAFE.sub("", v)
         else:
             out[k] = _TEXT_UNSAFE.sub("", v).lstrip(" /")

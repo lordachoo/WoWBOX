@@ -11,7 +11,8 @@ from PySide6.QtCore import QObject, QTimer, Signal
 
 from .activity import ActivityFeed
 from .automation import AutomationEngine
-from .automation.engine import condition_report
+from .automation.actions import flatten
+from .automation.engine import RuleRuntime, compile_condition
 from .automation.macros import MacroRunner
 from .commands import TeamCommands
 from .config import AutomationRule, MacroConfig
@@ -405,11 +406,14 @@ class Controller(QObject):
             lines.append(f"Fires on a {'/'.join(ch.channel)} line {src}{words}, heard by "
                          f"{', '.join(heard) if heard else '<b>nobody</b> (check Heard by)'}.")
         if rule.when is not None:
-            ok, per = condition_report(rule.when, self.states(), skip_dead=self.cfg.automation_options.skip_dead)
+            rt = RuleRuntime(rule, flatten(rule.do), compile_condition(rule.when))
+            ok, per, values = self.engine._check(rt, self.states())  # same rules as the engine: dead, too far
             who = " · ".join(f"{names.get(s, s)}: " + ("<span style='color:#2e7d32'>matches</span>" if m
                                                           else f"no ({why})") for s, m, why in per)
             head = "<b style='color:#2e7d32'>Condition is TRUE now</b>" if ok else "<b>Condition is false now</b>"
             lines.append(f"{head}{' (the chat line must also come in)' if rule.chat else ''}: {who or 'no characters'}")
+            if ok and values:
+                lines.append(f"{{name}} would be <b>{values['name']}</b> (health {values['health']}%).")
         if rule.every is not None:
             lines.append(f"Fires every {fmt_duration(rule.every)}, the first time {fmt_duration(rule.every)} after "
                          f"automation is turned on.")
@@ -614,6 +618,10 @@ class Controller(QObject):
 
     def missing_windows(self) -> list[int]:
         return sorted(self._lost)
+
+    def apart(self, slot: int, other: int) -> str | None:
+        """Why `slot` isn't near `other` (another zone, too far), or None (near, or can't tell)."""
+        return self.where_apart(slot, other)
 
     def character_names(self) -> set[str]:
         """Your own characters: the ones logged in now, plus those pinned to slots (for chat `sender: team`)."""

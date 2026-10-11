@@ -462,3 +462,58 @@ def test_queue_view_shows_running_waiting_and_queued():
     assert view[("heal", "waiting")].priority == 5
     q = view[("buffs", "queued")]
     assert q.who == "Gnope" and q.order == 1 and q.slots == [3] and "expires in" in q.detail
+
+
+# ---------------------------------------------------------------- far away characters, {name}
+class FarSource(Source):
+    """Tinkerdawn (1) and Kunth (3) together; Gnope (2) in another zone."""
+    def apart(self, slot, other):
+        return "in another zone" if 2 in (slot, other) and slot != other else None
+
+
+def far_engine(rules, **opts):
+    e, sender = engine(rules, **opts)
+    e.source = FarSource()
+    for s, st in e.source.st.items():  # everyone at full health to start with
+        e.source.st[s] = ClientState(name=st.name, health_pct=100.0)
+    return e, sender
+
+
+def test_a_character_in_another_zone_doesnt_trigger_heals():
+    e, sender = far_engine([LOW_HP])
+    e.source.st[2] = ClientState(name="Gnope", health_pct=20.0)  # hurt, but far away
+    e.tick(0)
+    assert sender.sent == []
+    st = e.status(e.rules[0], 0)
+    assert "too far from Kunth: in another zone" in st.next
+    e.source.st[1] = ClientState(name="Tinkerdawn", health_pct=60.0)  # hurt and with Kunth
+    e.tick(10)
+    assert typed(sender) == ["/cast Chain Heal"]
+
+
+def test_far_check_can_be_turned_off():
+    e, sender = far_engine([LOW_HP], skip_far=False)
+    e.source.st[2] = ClientState(name="Gnope", health_pct=20.0)
+    e.tick(0)
+    assert typed(sender) == ["/cast Chain Heal"]
+
+
+def test_name_is_the_lowest_health_character_that_matched():
+    rule = {"name": "heal-low", "when": {"slot": "any", "health_pct_lt": 50},
+            "do": {"type": "/cast [@{name}] Healing Wave", "to": "Kunth"}}
+    e, sender = far_engine([rule])
+    e.source.st[1] = ClientState(name="Tinkerdawn", health_pct=40.0)
+    e.source.st[3] = ClientState(name="Kunth", health_pct=30.0)
+    e.source.st[2] = ClientState(name="Gnope", health_pct=5.0)  # lowest, but in another zone
+    e.tick(0)
+    assert typed(sender) == ["/cast [@Kunth] Healing Wave"]
+
+
+def test_chat_rule_with_a_condition_gets_name_too():
+    rule = {"name": "heal-tank-if-low", "chat": {"contains": ["heal"], "heard_by": "Kunth"},
+            "when": {"slot": [1], "health_pct_lt": 90},
+            "do": {"type": "/cast [@{name}] Healing Wave", "to": "Kunth"}}
+    e, sender = far_engine([rule])
+    e.source.st[1] = ClientState(name="Tinkerdawn", health_pct=70.0)
+    e.on_chat(3, whisper(text="heal"), now=0)
+    assert typed(sender) == ["/cast [@Tinkerdawn] Healing Wave"]

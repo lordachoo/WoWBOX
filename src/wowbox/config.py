@@ -270,6 +270,9 @@ class AutomationOptions(_Model):
     # Dead characters (or ghosts) don't match conditions like health < 30 and get no steps sent to them,
     # unless the condition itself asks about `dead`/`ghost`.
     skip_dead: bool = True
+    # A character in another zone, or farther than follow.mirror_max_distance_yards from every character a rule
+    # acts on, doesn't count for that rule's condition (no healing someone you can't reach).
+    skip_far: bool = True
 
 
 class MemReadField(_Model):
