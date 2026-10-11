@@ -617,6 +617,9 @@ class MainWindow(QMainWindow):
             lines.append("<b>Automation is in DRY RUN</b>: rules only log what they would do and send nothing. "
                          "Untick Dry run to make them act.")
             serious = True
+        if held := c.router.waiting():
+            lines.append("Waiting for you to stop typing or pressing keys: " + ", ".join(
+                f"{name(s)} ({n} queued)" for s, n in sorted(held.items())) + ". It goes out when you stop.")
         if gone := c.missing_windows():
             lines.append(f"Window closed: {', '.join(name(s) for s in gone)}. Left out of broadcasting and rules; "
                          "Attach or Launch brings it back.")

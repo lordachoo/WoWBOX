@@ -11,6 +11,7 @@ import os
 import queue
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass
 from typing import Callable
 
@@ -27,6 +28,13 @@ MOD_ORDER = (Mod.CTRL, Mod.ALT, Mod.SHIFT)
 PRESS_HOLD = 0.03
 VK_RETURN = 0x0D
 CHAT_OPEN_WAIT = 0.08  # after Enter, before the text: let the client open its chat box
+DEFER_POLL = 0.02  # how often waiting lines check whether their client is free
+
+
+def _describe_op(op: tuple) -> str:
+    if op[0] == "text":
+        return f"typing {op[2]!r}"
+    return f"key {op[2]:#x}"
 
 
 @dataclass
@@ -40,7 +48,9 @@ class _Pressed:
 class Router:
     def __init__(self, team: Team, routes: RouteTable, input_api: InputAPI, windows: WindowAPI,
                  chatguard: ChatGuard, cfg: BroadcastConfig, hotkeys: HotkeyConfig,
-                 on_hotkey: Callable[[str], None] = lambda name: None, macros: list | None = None) -> None:
+                 on_hotkey: Callable[[str], None] = lambda name: None, macros: list | None = None,
+                 clock: Callable[[], float] = time.monotonic) -> None:
+        self.clock = clock
         self.team = team
         self.routes = routes
         self.input = input_api
@@ -65,17 +75,32 @@ class Router:
         self._q: queue.SimpleQueue = queue.SimpleQueue()
         self._sender: threading.Thread | None = None
         self.sent_count = 0
+        self._last_key_down = -1e9  # your last physical key press (not modifiers)
+        self._typing_into: frozenset[int] = frozenset()  # slots a line is being typed into right now
+        # Per slot: typed lines / automation presses waiting for you to stop typing there, in order.
+        self._waiting: dict[int, deque] = {}  # slot -> deque of [queued_at, op]
+        self._shift: dict[int, float] = {}  # slot -> delay applied to its queue once it was free again
+        self._said: dict[int, str] = {}  # slot -> the reason last logged, so a wait is logged once
+        self._wait_lock = threading.Lock()
+        self._deferrer: threading.Thread | None = None
+        self._stop = threading.Event()
 
     # -- lifecycle --------------------------------------------------------
     def start(self) -> None:
         if self._sender is None:
             self._sender = threading.Thread(target=self._send_loop, name="router-sender", daemon=True)
             self._sender.start()
+        if self._deferrer is None:
+            self._stop.clear()
+            self._deferrer = threading.Thread(target=self._defer_loop, name="router-defer", daemon=True)
+            self._deferrer.start()
         self.input.start_hook(self.on_key)
 
     def stop(self) -> None:
         self.input.stop_hook()
         self.release_all()
+        self._stop.set()
+        self._deferrer = None
         self._q.put(None)
         if self._sender:
             self._sender.join(2)
@@ -142,6 +167,10 @@ class Router:
         if ev.injected:
             return False
         vk = ev.vk
+        if ev.down and vk not in MODIFIER_VKS:
+            if self._typing_into and self.team.slot_for_hwnd(self.windows.foreground()) in self._typing_into:
+                return True  # a line is being typed into this window: keep your keys out of it
+            self._last_key_down = self.clock()
         if vk in self.mirror_vks:
             self.last_movement = time.monotonic()
         if vk in MODIFIER_VKS:
@@ -234,26 +263,110 @@ class Router:
         return slots
 
     def type_text(self, text: str, target: Target) -> list[int]:
-        """Type a chat line in each target: Enter, the text, Enter (e.g. "/assist Tinkerdawn")."""
-        slots = self._targets(target, check_typing=False)
+        """Type a chat line in each target: Enter, the text, Enter (e.g. "/assist Tinkerdawn"). A client where
+        you're typing, or the window you're pressing keys in, gets it once you've stopped (see `busy`)."""
+        slots = self.team.resolve(target, self.active_slot())
         if slots:
-            self._q.put(("text", tuple(slots), text))
+            self._send_or_wait(slots, lambda s: ("text", s, text))
         else:
             log.info("type %r: no client matches %r", text, target)
         return slots
 
     def send_chord(self, chord: Chord, target: Target, check_typing: bool = True) -> list[int]:
-        """Send a full press of `chord` to `target`. Automation skips clients that are typing."""
-        slots = self._targets(target, check_typing)
+        """Send a full press of `chord` to `target`. With check_typing (automation), a client where you're
+        typing waits like a typed line does; without it (your own hotkey macros) it goes at once."""
+        slots = self.team.resolve(target, self.active_slot()) if check_typing else self._targets(target, False)
         if not slots:
             log.info("send %s: no client matches %r", chord, target)
-        if slots:
-            if self.cfg.modifier_mode == "focus_swap" and chord.mods:
-                self._q.put(("swap_press", tuple(slots), chord.vk, chord.mods, None))
-            else:
-                mods = Mod.NONE if self.cfg.modifier_mode == "strip" else chord.mods
-                self._q.put(("press", tuple(slots), chord.vk, mods))
+            return slots
+        if self.cfg.modifier_mode == "focus_swap" and chord.mods:
+            op = lambda s: ("swap_press", s, chord.vk, chord.mods, None)  # noqa: E731
+        else:
+            mods = Mod.NONE if self.cfg.modifier_mode == "strip" else chord.mods
+            op = lambda s: ("press", s, chord.vk, mods)  # noqa: E731
+        if check_typing:
+            self._send_or_wait(slots, op)
+        else:
+            self._q.put(op(tuple(slots)))
         return slots
+
+    # -- waiting for you to stop typing ------------------------------------
+    def busy(self, slot: int) -> str | None:
+        """Why a line typed into `slot` now would get mixed up with what you're doing, or None.
+        "typing": its chat box is open. "keys": it's the window you're in and you're pressing keys."""
+        st = self.team.clients[slot].state if slot in self.team.clients else None
+        if st is not None and not st.stale and (st.typing or st.chat_open):
+            return "typing"
+        if slot != self.active_slot():
+            return None
+        if self.chatguard.paused(slot):
+            return "typing"
+        if any(not p.hotkey for p in self._pressed.values()) or \
+                self.clock() - self._last_key_down < self.cfg.type_quiet:
+            return "keys"
+        return None
+
+    def _send_or_wait(self, slots: list[int], make_op: Callable[[tuple[int, ...]], tuple]) -> None:
+        now = self.clock()
+        go = []
+        with self._wait_lock:
+            for s in slots:
+                if s in self._waiting or self.busy(s):  # keep the order behind anything already waiting
+                    self._waiting.setdefault(s, deque()).append([now, make_op((s,))])
+                else:
+                    go.append(s)
+        if go:
+            self._q.put(make_op(tuple(go)))
+        self._pump()
+
+    def _pump(self) -> None:
+        """Send what's waiting for clients that are free now. Keeps the gaps between a rule's steps."""
+        now = self.clock()
+        with self._wait_lock:
+            for s in list(self._waiting):
+                q = self._waiting[s]
+                while q:
+                    queued_at, op = q[0]
+                    why = self.busy(s)
+                    if why and s not in self._shift:
+                        if now - queued_at < self.cfg.type_wait_max:
+                            if self._said.get(s) != why:
+                                self._said[s] = why
+                                log.info("%s: waiting for you to stop %s there", self._name(s),
+                                         "typing" if why == "typing" else "pressing keys")
+                            break
+                        if why == "typing":
+                            q.popleft()
+                            log.warning("%s: skipped %s (you were still typing there after %gs)", self._name(s),
+                                        _describe_op(op), self.cfg.type_wait_max)
+                            continue
+                        # only keys after the wait: send it; your keys are held back while it's typed
+                    shift = self._shift.setdefault(s, now - queued_at)
+                    if now < queued_at + shift:
+                        break  # the gap a rule had between this step and the one before
+                    q.popleft()
+                    self._q.put(op)
+                if not q:
+                    del self._waiting[s]
+                    self._shift.pop(s, None)
+                    self._said.pop(s, None)
+
+    def waiting(self) -> dict[int, int]:
+        """Slot -> how many lines/presses wait for you there (for the UI)."""
+        with self._wait_lock:
+            return {s: len(q) for s, q in self._waiting.items()}
+
+    def _name(self, slot: int) -> str:
+        c = self.team.clients.get(slot)
+        return c.name if c else f"slot {slot}"
+
+    def _defer_loop(self) -> None:
+        while not self._stop.wait(DEFER_POLL):
+            if self._waiting:
+                try:
+                    self._pump()
+                except Exception:
+                    log.exception("deferred send failed")
 
     def release_all(self) -> None:
         """Key-up for everything we pressed, plus all modifiers, on every client."""
@@ -287,20 +400,30 @@ class Router:
             return
         if kind == "text":
             hwnds = self._hwnds(op[1])
-            for h in hwnds:
-                self.input.post_key(h, VK_RETURN, True)
-                self.input.post_key(h, VK_RETURN, False)
-            time.sleep(CHAT_OPEN_WAIT)
-            for h in hwnds:
-                for ch in op[2]:
-                    self.input.post_char(h, ch)
-            time.sleep(CHAT_OPEN_WAIT / 2)
-            for h in hwnds:
-                self.input.post_key(h, VK_RETURN, True)
-                self.input.post_key(h, VK_RETURN, False)
-            time.sleep(CHAT_OPEN_WAIT / 2)  # let the box close before any key that follows
+            self._typing_into = frozenset(op[1])
+            try:
+                self._type_line(hwnds, op[2])
+            finally:
+                self._typing_into = frozenset()
             return
-        _, slots, vk, mods = op
+        self._execute_keys(op)
+
+    def _type_line(self, hwnds: list[int], text: str) -> None:
+        for h in hwnds:
+            self.input.post_key(h, VK_RETURN, True)
+            self.input.post_key(h, VK_RETURN, False)
+        time.sleep(CHAT_OPEN_WAIT)
+        for h in hwnds:
+            for ch in text:
+                self.input.post_char(h, ch)
+        time.sleep(CHAT_OPEN_WAIT / 2)
+        for h in hwnds:
+            self.input.post_key(h, VK_RETURN, True)
+            self.input.post_key(h, VK_RETURN, False)
+        time.sleep(CHAT_OPEN_WAIT / 2)  # let the box close before any key that follows
+
+    def _execute_keys(self, op: tuple) -> None:
+        kind, slots, vk, mods = op
         hwnds = self._hwnds(slots)
         if kind == "down":
             for h in hwnds:

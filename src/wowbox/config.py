@@ -130,6 +130,11 @@ class BroadcastConfig(_Model):
     modifier_mode: Literal["post", "focus_swap", "strip"] = "post"
     focus_swap_dwell: Duration = 0.04
     only_when_wow_focused: bool = True
+    # Typed lines (and automation key presses) wait while you're typing in that client, or pressing keys in
+    # the window you're in, so they don't get mixed into what you type. After this long: a client still
+    # typing is skipped; one where you're only holding keys gets it anyway (your stray keys are held back).
+    type_wait_max: Duration = 8.0
+    type_quiet: Duration = 0.35  # how long after your last key press the window you're in counts as free
 
 
 class RouteConfig(_Model):

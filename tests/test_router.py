@@ -138,12 +138,106 @@ def test_release_all_sends_ups(rig):
         assert (SHIFT, False) in posted[slot]
 
 
-def test_send_chord_skips_typing_clients(rig):
+# ---------------------------------------------------------------- automation waits for you
+def waiting_rig():
+    from conftest import Clock
+    r = Rig(clock=Clock())
+    r.router.clock = r.clock
+    return r
+
+
+def chars_to(r, slot):
+    return "".join(ch for h, ch in r.input.chars if h == HWNDS[slot])
+
+
+def test_typed_line_waits_while_that_client_is_typing():
+    from wowbox.bridge.decoder import ClientState
+    r = waiting_rig()
+    r.team.clients[2].state = ClientState(typing=True)
+    assert r.router.type_text("/cast Heal", "all") == [1, 2, 3, 4]
+    r.drain()
+    assert chars_to(r, 3) == "/cast Heal" and chars_to(r, 2) == ""  # the others don't wait
+    assert r.router.waiting() == {2: 1}
+    r.clock.t += 2
+    r.router._pump(); r.drain()
+    assert chars_to(r, 2) == ""
+    r.team.clients[2].state = ClientState(typing=False)
+    r.router._pump(); r.drain()
+    assert chars_to(r, 2) == "/cast Heal" and r.router.waiting() == {}
+
+
+def test_automation_key_press_waits_too_but_your_macros_dont():
     from wowbox.bridge.decoder import ClientState
     from wowbox.keys import parse_chord
-    rig.team.clients[2].state = ClientState(typing=True)
-    sent = rig.router.send_chord(parse_chord("F5"), "all")
-    assert sent == [1, 3, 4]
+    r = waiting_rig()
+    r.team.clients[2].state = ClientState(chat_open=True)
+    r.router.send_chord(parse_chord("F5"), [2])
+    r.drain()
+    assert 2 not in r.posted_to()
+    r.router.send_chord(parse_chord("F6"), [2], check_typing=False)  # a hotkey macro you pressed yourself
+    r.drain()
+    assert (VK["F6"], True) in r.posted_to()[2]
+
+
+def test_window_you_are_pressing_keys_in_waits_until_you_stop():
+    r = waiting_rig()  # slot 1 is the window you're in
+    W = VK["W"]
+    r.press(W, True)
+    r.router.type_text("/assist Tinkerdawn", [1])
+    r.drain()
+    assert chars_to(r, 1) == "" and r.router.busy(1) == "keys"
+    r.press(W, False)
+    r.router._pump(); r.drain()
+    assert chars_to(r, 1) == ""  # just let go: still within type_quiet
+    r.clock.t += 0.5
+    r.router._pump(); r.drain()
+    assert chars_to(r, 1) == "/assist Tinkerdawn"
+
+
+def test_waiting_steps_keep_their_order_and_gaps():
+    from wowbox.bridge.decoder import ClientState
+    from wowbox.keys import parse_chord
+    r = waiting_rig()
+    r.team.clients[3].state = ClientState(typing=True)
+    r.router.type_text("/target Gnope", [3])
+    r.clock.t += 0.2
+    r.router.send_chord(parse_chord("5"), [3])  # queued behind the line, 0.2 s later
+    r.clock.t += 3
+    r.team.clients[3].state = ClientState()
+    r.router._pump(); r.drain()
+    assert chars_to(r, 3) == "/target Gnope"
+    assert {vk for vk, _ in r.posted_to()[3]} == {ENTER}  # the line went; the 5 keeps its 0.2 s gap
+    r.clock.t += 0.25
+    r.router._pump(); r.drain()
+    assert (VK["5"], True) in r.posted_to()[3]
+
+
+def test_still_typing_after_the_wait_skips_it():
+    from wowbox.bridge.decoder import ClientState
+    r = waiting_rig()
+    r.team.clients[2].state = ClientState(typing=True)
+    r.router.type_text("/cast Heal", [2])
+    r.clock.t += r.cfg.broadcast.type_wait_max + 0.1
+    r.router._pump(); r.drain()
+    assert chars_to(r, 2) == "" and r.router.waiting() == {}
+
+
+def test_holding_a_key_past_the_wait_sends_it_anyway():
+    r = waiting_rig()
+    r.press(VK["W"], True)  # running for a long time
+    r.router.type_text("/cast Heal", [1])
+    r.clock.t += r.cfg.broadcast.type_wait_max + 0.1
+    r.router._pump(); r.drain()
+    assert chars_to(r, 1) == "/cast Heal"
+
+
+def test_your_keys_are_held_back_while_a_line_is_typed_into_your_window():
+    r = waiting_rig()
+    r.router._typing_into = frozenset({1})  # the sender is typing a line into slot 1
+    assert r.input.press(VK["W"], True) is True  # swallowed: no "www" in the line
+    assert r.input.press(VK["W"], False) is False  # key-ups pass
+    r.router._typing_into = frozenset()
+    assert r.input.press(VK["W"], True) is False
 
 
 def test_every_hotkey_name_in_config_is_registered():

@@ -52,6 +52,8 @@ broadcast:
   modifier_mode: post           # post | focus_swap | strip - how Shift/Ctrl/Alt chords reach background clients (see README)
   focus_swap_dwell: 40ms
   only_when_wow_focused: true
+  type_wait_max: 8s             # typed lines wait this long for you to stop typing / pressing keys in that client
+  type_quiet: 0.35s             # the window you're in counts as free this long after your last key press
 
 follow:
   leader: leader                # who to follow (the leader slot; or a character name)

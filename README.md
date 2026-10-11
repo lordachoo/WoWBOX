@@ -854,7 +854,13 @@ Long triggers and actions are cut off with "…". Hover over them to see all of 
   - **Pausing is per rule.** With `pause_on_stale_bridge` (on by default), a client whose bridge can't be read (minimized, covered, addon off) pauses only the rules that check or send to it, because WoWBox can't tell whether you're typing there. Every other rule keeps running.
   - **A closed window** pauses nothing: targets like `all` simply leave it out.
   - **The banner** under the toolbar shows from any tab when rules are paused, when Dry run is on (rules log but send nothing), or when a window was closed.
-  - Key presses skip clients that are typing.
+  - **Nothing gets mixed into what you're typing.** A typed line (or an automation key press) waits:
+    - while that client's chat box is open, so it doesn't land in your half-typed message or send it;
+    - while you're pressing keys in the window you're in (holding W to run, or within `type_quiet`, 0.35 s, of your last key), so no `www/cast Heal`.
+
+    Waiting lines go out as soon as you stop, in order and with the same gaps between a rule's steps. The banner shows what's waiting.
+  - **After `type_wait_max` (8 s):** a client that's still typing is skipped, and the log says so. If you're only holding a key (running a long way), the line goes anyway, and your key presses in that window are held back for the ~0.2 s it takes to type it.
+  - **Your own hotkey macros** don't wait for key presses: you pressed the hotkey, so the keys go at once.
   - Every firing is logged.
 
 ## 14. WotLK slash commands for macros and automation
@@ -1053,7 +1059,7 @@ Everything lives in `config\team.yaml`. The exe uses `config\team.yaml` next to 
 | `team` | `leader`, `slots: {n: {label, role, character}}` |
 | `layout` | `default`, `monitor`, `thumbs_monitor`, `thumb_strip` (0.22), `tab_bar_height` |
 | `hotkeys` | `toggle_broadcast`, `release_all`, `follow`, `stay`, `stack`, `mirror_movement`, `cycle_layout`, `next_main`, `automation_kill`, `focus_slot: {n: chord}` |
-| `broadcast` | `enabled_on_start`, `chatguard`, `chatguard_open_keys`, `chatguard_close_keys`, `modifier_mode` (post / focus_swap / strip), `focus_swap_dwell`, `only_when_wow_focused` |
+| `broadcast` | `enabled_on_start`, `chatguard`, `chatguard_open_keys`, `chatguard_close_keys`, `modifier_mode` (post / focus_swap / strip), `focus_swap_dwell`, `only_when_wow_focused`, `type_wait_max` (8 s), `type_quiet` (0.35 s) |
 | `follow`, `stack` | section 11 |
 | `routes` | list of `{keys, to, note}` (section 9) |
 | `bridge` | `enabled`, `hz` (10), `block_size` (8, match `/bb size`), `method` (auto / mss / dxcam / printwindow), `stale_after` (1.5s), `commands` (true) |
