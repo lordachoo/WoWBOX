@@ -68,6 +68,8 @@ def test_rules_and_macros_report_into_the_feed():
     got = [(a.name, a.kind, a.slots) for a in feed.items()]
     assert got == [("heal", "fired", []), ("heal", "step", [3])]
     assert feed.items()[1].text == "typed '/cast [@Gnope] Healing Wave' -> slots [3]"
+    e.set_enabled(False)
+    assert feed.items()[-1].name == "(automation)" and feed.items()[-1].text == "automation OFF"
 
     m = MacroRunner([MacroConfig.model_validate({"name": "pets", "do": {"sequence": [
         {"type": "/petattack", "to": "all"}, {"send": "1", "to": "all"}]}})], Sender())

@@ -63,7 +63,6 @@ class ActivityTab(QWidget):
         qh = self.queue.header()
         qh.setSectionResizeMode(QHeaderView.ResizeToContents)
         qh.setSectionResizeMode(QUEUE_COLS.index("Detail"), QHeaderView.Stretch)
-        self.queue_empty = QLabel("<span style='color:gray'>Nothing running or queued.</span>")
 
         # feed
         self.feed = QTableWidget(0, len(FEED_COLS))
@@ -100,18 +99,18 @@ class ActivityTab(QWidget):
                 lay.addWidget(x)
             return w
 
+        # characters: always exactly as tall as its rows; the queue and the feed share the rest
         split = QSplitter(Qt.Vertical)
-        split.addWidget(section("<b>Characters</b> · state, and the last thing a rule or macro sent each one",
-                                self.chars))
         split.addWidget(section("<b>Live queue</b> · per character, in the order things will go: running now "
                                 "(rules and macros), waiting (for a cast, the global cooldown or a rule with "
-                                "priority) and queued chat requests", self.queue, self.queue_empty))
+                                "priority) and queued chat requests", self.queue))
         split.addWidget(section(filters, self.feed))
-        split.setStretchFactor(0, 0)  # characters: as tall as its rows
-        split.setStretchFactor(1, 2)
-        split.setStretchFactor(2, 3)
+        split.setStretchFactor(0, 2)
+        split.setStretchFactor(1, 3)
         lay = QVBoxLayout(self)
-        lay.addWidget(split)
+        lay.addWidget(QLabel("<b>Characters</b> · state, and the last thing a rule or macro sent each one"))
+        lay.addWidget(self.chars)
+        lay.addWidget(split, 1)
 
     # ------------------------------------------------------------------ helpers
     def _name(self, slot: int) -> str:
@@ -210,8 +209,10 @@ class ActivityTab(QWidget):
                 f.setBold(True)
                 row.setFont(0, f)
             t.addTopLevelItem(row)
-        t.setVisible(bool(lines))
-        self.queue_empty.setVisible(not lines)
+        if not lines:
+            empty = QTreeWidgetItem(["", "", "Nothing running or queued."])
+            empty.setForeground(2, QColor("#9e9e9e"))
+            t.addTopLevelItem(empty)
 
     def _shown(self, a) -> bool:
         if a.source == "rule" and not self.show_rules.isChecked():

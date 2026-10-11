@@ -623,6 +623,6 @@ class AutomationEngine:
         log.info(msg)
         self.on_event(msg)
         m = RULE_NAME.search(msg)
-        name = m.group(2) if m else self._ctx
+        name = m.group(2) if m else self._ctx if msg.startswith("  ") else "(automation)"  # step lines are indented
         text = RULE_NAME.sub("", msg, count=1).strip(" :") if m else msg
         self.on_activity(name, text.strip(), list(slots or []))
