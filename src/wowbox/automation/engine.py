@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 from collections import deque
 import operator
+import re
 from dataclasses import dataclass, field
 from typing import Callable, Protocol
 
@@ -22,6 +23,7 @@ OPS: dict[str, Callable[[object, object], bool]] = {
     "_lt": operator.lt, "_lte": operator.le, "_gt": operator.gt, "_gte": operator.ge, "_ne": operator.ne,
 }
 CLAIM_RECHECK = 0.05  # a step queued behind another rule's waiting step looks again this soon
+RULE_NAME = re.compile(r"^\s*rule (['\"])(.+?)\1")  # "rule 'heal' fired ..." -> heal
 CHAT_DEDUPE = 2.0  # the same party/raid line heard by several of your clients fires a rule once
 
 
@@ -181,6 +183,9 @@ class AutomationEngine:
         self.blocked: dict[str, str] = {}  # rule name -> why it's paused right now
         self._gone: list[int] = []
         self.on_event: Callable[[str], None] = lambda msg: None
+        # (rule name, what happened, characters it went to): for the Activity tab
+        self.on_activity: Callable[[str, str, list[int]], None] = lambda name, text, slots: None
+        self._ctx = ""  # the rule being worked on, for step lines that don't name it
         self.on_macro: Callable[[str], None] = lambda name: log.warning("no macro runner for %r", name)
         self._chat_seen: dict[tuple, float] = {}
         self.rules: list[RuleRuntime] = []
@@ -506,6 +511,7 @@ class AutomationEngine:
         self._advance(rt, now)
 
     def _advance(self, rt: RuleRuntime, now: float) -> None:
+        self._ctx = rt.rule.name
         steps = rt.run_steps if rt.run_steps is not None else rt.steps
         while rt.running_step is not None and now >= rt.resume_at:
             if rt.running_step >= len(steps):
@@ -522,7 +528,7 @@ class AutomationEngine:
                     alive = [s for s in slots if not self._dead(s)]
                     if not alive and slots:
                         rt.running_step += 1
-                        self._event(f"  skipped {describe([step])}: {self._names(slots)} dead")
+                        self._event(f"  skipped {describe([step])}: {self._names(slots)} dead", slots)
                         continue
                     if len(alive) < len(slots):
                         to = alive  # leave the dead out
@@ -542,15 +548,16 @@ class AutomationEngine:
                     self.on_macro(step.name)
             elif isinstance(step, TypeStep):
                 if self.dry_run:
-                    self._event(f"  [dry run] would type {step.text!r} -> {to}")
+                    self._event(f"  [dry run] would type {step.text!r} -> {to}", slots)
                 else:
-                    self._event(f"  typed {step.text!r} -> slots {self.sender.type_text(step.text, to)}")
+                    sent = self.sender.type_text(step.text, to)
+                    self._event(f"  typed {step.text!r} -> slots {sent}", sent)
             elif isinstance(step, SendStep):
                 if self.dry_run:
-                    self._event(f"  [dry run] would send {step.chord} -> {to}")
+                    self._event(f"  [dry run] would send {step.chord} -> {to}", slots)
                 else:
-                    slots = self.sender.send_chord(step.chord, to)
-                    self._event(f"  sent {step.chord} -> slots {slots}")
+                    sent = self.sender.send_chord(step.chord, to)
+                    self._event(f"  sent {step.chord} -> slots {sent}", sent)
 
     def _turn(self, rt: RuleRuntime, slots: list[int], now: float) -> float:
         """When this rule's next step may go to `slots`. Rules take turns on a character:
@@ -612,6 +619,10 @@ class AutomationEngine:
         names = [st.name if (st := self._state(s)) and st.name else f"slot {s}" for s in slots]
         return ", ".join(names)
 
-    def _event(self, msg: str) -> None:
+    def _event(self, msg: str, slots: list[int] | None = None) -> None:
         log.info(msg)
         self.on_event(msg)
+        m = RULE_NAME.search(msg)
+        name = m.group(2) if m else self._ctx
+        text = RULE_NAME.sub("", msg, count=1).strip(" :") if m else msg
+        self.on_activity(name, text.strip(), list(slots or []))

@@ -9,6 +9,7 @@ from typing import Callable
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
+from .activity import ActivityFeed
 from .automation import AutomationEngine
 from .automation.engine import condition_report
 from .automation.macros import MacroRunner
@@ -93,6 +94,9 @@ class Controller(QObject):
                                        bridge_enabled=cfg.bridge.enabled)
         self.macros = MacroRunner(cfg.macros, self.router)
         self.engine.on_macro = self.macros.start
+        self.activity = ActivityFeed()
+        self.engine.on_activity = lambda name, text, slots: self.activity.add("rule", name, text, slots)
+        self.macros.on_activity = lambda name, text, slots: self.activity.add("macro", name, text, slots)
         self.memread = MemReadPoller(cfg.memread, self._pids, self._on_mem_values)
         self.stacker = Stacker(cfg.stack, self._client_state, self._post_raw)
         self.commands = TeamCommands(self.router, self._client_state)

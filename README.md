@@ -194,6 +194,7 @@ On start, WoWBox attaches to every running `Wow.exe` window. It puts each window
 | **Routes** | The route table. A change takes effect as soon as you finish editing a cell. A bad row turns red and isn't used. **Save config** keeps the changes after a restart. |
 | **Macros** | Your macros with their hotkeys, whether they're running, and their steps. **New / Edit / Duplicate / Delete** open the macro editor (double-click edits too). Run/Stop, Stop all. |
 | **Automation** | Every rule with its trigger and actions, plus live columns: **Status** (waiting, cooldown 8s, running step 2/4, disabled, automation OFF), **Next** (timers get a countdown bar, e.g. *in 12m 05s*; state rules say whether the condition is true now and why not; chat rules wait for a line), **Last fired** and **Fired** (count). **New / Edit / Duplicate / Delete** open the rule editor (double-click edits too). The *On* box enables or disables a rule, and the change is saved at once. |
+| **Activity** | The live dashboard of rules and macros: each character's state and last action, the live queue, and a feed of recent activity. Section 13, *The Activity tab*. |
 | **Log** | Everything WoWBox does: keys typed, rules fired, chat lines seen, `/bb` commands. The same goes to `logs\wowbox.log`. |
 
 A tray icon offers the same switches. Its dot is green while broadcasting and red while not, with a yellow ring while automation is on. Closing the window quits WoWBox.
@@ -859,15 +860,27 @@ The **Automation** tab updates four times a second:
 
 Long triggers and actions are cut off with "…". Hover over them to see all of it.
 
-**Live queue** (under the rules) shows, per character, everything that's happening there, in the order it will go:
+### The Activity tab
 
-| State | Means | Detail shows |
-|---|---|---|
-| **running** (green) | a rule is going through its steps | the next step, and how long until it, e.g. *step 3/9: type '/cast Might' -> Kunth · in 1s* |
-| **waiting** (orange) | its next step is held back | why: *Kunth casting*, *global cooldown after 'buffs'*, or *'totems' goes first* (priority) |
-| **queued** (blue) | a chat request waiting for its rule to be free | its place, how long ago it was asked and when it expires, e.g. *#2 · asked 4s ago · expires in 56s* |
+A live dashboard of everything rules and macros do. It updates four times a second while it's open.
 
-The rule holding a character's turn is listed first among the waiting ones; a rule's priority is shown next to its name. Typed lines waiting for you to stop typing in a window are listed too. **Timers start when automation is turned on:** a timer never fires the moment you switch automation on, even if it came due while automation was off.
+- **Characters:** one row per client.
+  - **State:** `ok` with HP and power, `casting`, `channeling`, `typing`, `DEAD`, or `no bridge data`.
+  - **Queue:** how many things are running, waiting or queued for that character.
+  - **Last action:** the last line or key a rule or macro sent it, which rule or macro sent it, and how long ago.
+- **Live queue:** per character, in the order things will go:
+
+  | State | Means | Detail shows |
+  |---|---|---|
+  | **running** (green) | a rule going through its steps | the next step, and how long until it, e.g. *step 3/9: type '/cast Might' -> Kunth · in 1s* |
+  | **macro** (purple) | a macro running | its next step and how long it's been running |
+  | **waiting** (orange) | a step held back | why: *Kunth casting*, *global cooldown after 'buffs'*, or *'totems' goes first* (priority) |
+  | **queued** (blue) | a chat request waiting for its rule to be free | its place, how long ago it was asked and when it expires, e.g. *#2 · asked 4s ago · expires in 56s* |
+
+  The rule holding a character's turn is listed first among the waiting ones, and a rule's priority is shown next to its name. Typed lines waiting for you to stop typing in a window are listed too.
+- **Recent activity:** the last 300 events, newest first: rules firing (with the chat line that triggered them), each line or key sent and to whom, macros starting and finishing, requests queued, and anything skipped or expired.
+  - **Colours:** fired is green, queued blue, skipped red, done grey.
+  - **Filters:** tick boxes show or hide **Rules**, **Macros**, **Each step** and **Queue and skips**. **Clear** empties the feed. **Timers start when automation is turned on:** a timer never fires the moment you switch automation on, even if it came due while automation was off.
 
 ### Common to all rules
 

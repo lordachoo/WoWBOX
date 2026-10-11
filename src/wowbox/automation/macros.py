@@ -32,6 +32,9 @@ class MacroRunner:
                  on_event: Callable[[str], None] = lambda msg: None) -> None:
         self.sender = sender
         self.on_event = on_event
+        # (macro name, what happened, characters it went to): for the Activity tab
+        self.on_activity: Callable[[str, str, list[int]], None] = lambda name, text, slots: None
+        self.progress: dict[str, tuple[int, list[Step], float]] = {}  # running macro -> (step index, steps, started)
         self._running: dict[str, threading.Event] = {}
         self._lock = threading.Lock()
         self.macros: dict[str, tuple[MacroConfig, list[Step]]] = {}
@@ -88,12 +91,14 @@ class MacroRunner:
 
     def _run(self, name: str, steps: list[Step], cancel: threading.Event) -> None:
         self._event(f"macro {name!r} started")
+        self.progress[name] = (0, steps, time.monotonic())
         try:
             # Wait for the hotkey's Ctrl/Alt/Shift to be let go, or the first key lands as a chord in this window.
             deadline = time.monotonic() + MOD_RELEASE_TIMEOUT
             while self.sender.held_mods and time.monotonic() < deadline and not cancel.is_set():
                 time.sleep(0.01)
-            for step in steps:
+            for i, step in enumerate(steps):
+                self.progress[name] = (i, steps, self.progress.get(name, (0, steps, time.monotonic()))[2])
                 if cancel.is_set():
                     self._event(f"macro {name!r} stopped")
                     return
@@ -109,16 +114,25 @@ class MacroRunner:
                 elif isinstance(step, TypeStep):
                     slots = self.sender.type_text(step.text, step.to)
                     log.debug("macro %s: typed %r -> %s", name, step.text, slots)
+                    self.on_activity(name, f"typed {step.text!r} -> slots {slots}", slots)
                 elif isinstance(step, SendStep):
                     slots = self.sender.send_chord(step.chord, step.to, check_typing=False)
                     log.debug("macro %s: %s -> %s", name, step.chord, slots)
+                    self.on_activity(name, f"sent {step.chord} -> slots {slots}", slots)
             self._event(f"macro {name!r} done")
         except Exception:
             log.exception("macro %r failed", name)
         finally:
+            self.progress.pop(name, None)
             with self._lock:
                 self._running.pop(name, None)
 
     def _event(self, msg: str) -> None:
         log.info(msg)
         self.on_event(msg)
+        if msg.startswith("macro "):  # "macro 'x' started" -> ("x", "started")
+            rest = msg[len("macro "):]
+            quote = rest[:1]
+            end = rest.find(quote, 1)
+            if quote in "'\"" and end > 0:
+                self.on_activity(rest[1:end], rest[end + 1:].strip(), [])
