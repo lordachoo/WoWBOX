@@ -7,6 +7,7 @@ name = "wowbox"
 version = "0.1.0"
 description = "Multibox controller for WotLK 3.3.5a: launcher, layouts, input router, pixel bridge, automation"
 readme = "README.md"
+license = { text = "MIT" }
 requires-python = ">=3.12"
 dependencies = [
     "PySide6>=6.6",

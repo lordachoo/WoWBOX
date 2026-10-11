@@ -43,7 +43,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--quit-after", type=float, help=argparse.SUPPRESS)  # smoke tests
     args = ap.parse_args(argv)
 
-    # A short GIL switch interval keeps the keyboard hook responsive (spike S8: p99 1.6 ms vs ~900 ms under load).
+    # A short GIL switch interval keeps the keyboard hook responsive (measured: p99 1.6 ms vs ~900 ms under load).
     sys.setswitchinterval(0.0005)
     setup_logging(base / "logs", args.log_level)
     log = logging.getLogger("wowbox")

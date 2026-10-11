@@ -11,6 +11,16 @@ It works from outside the game. WoWBox never injects code into WoW or modifies i
 
 > **Server rules come first.** Many private servers restrict multiboxing tools, one-key-many-actions macros, or automation that reacts to the game without you. WoWBox gives you the tools. Whether you may use them is your server's call.
 
+**The example team.** The examples in this README use one real team. Put your own names in their place:
+
+| Slot | Character | Class | Role in the examples |
+|---|---|---|---|
+| 1 | **Tinkerdawn** | Paladin | Leader and tank. The others assist and follow Tinkerdawn. |
+| 2 | **Gnope** | Warlock (a Necromancer on the EQWOW server this was built for) | Damage and pet. |
+| 3 | **Kunth** | Shaman | Healer and buffer: the heal-on-whisper rules run on Kunth. |
+
+Class targets such as `class:WARLOCK` and `class:SHAMAN` work for any team.
+
 ---
 
 ## Contents
@@ -1073,7 +1083,6 @@ Close the exe before rebuilding: Windows locks a running exe.
 addon/BoxBridge/        the WoW addon (Lua): state strip, chat lines, /bb commands
 config/                 team.example.yaml (tracked); team.yaml, macros.yaml, automation.yaml (yours, not tracked)
 packaging/              build.ps1 + PyInstaller entry point
-spikes/                 Phase 0 experiments (see spikes/README.md and RESULTS.md)
 src/wowbox/
   __main__.py           command line, logging, startup
   app.py                Controller: owns every subsystem, bridges worker threads to the Qt UI
@@ -1095,7 +1104,6 @@ src/wowbox/
   memread/              optional read-only memory reader
   ui/                   main window, macro and rule editors, tray icon, overlay
 tests/                  pytest suite
-wowbox-project-plan.md  the original design plan
 ```
 
 ```powershell
@@ -1141,3 +1149,7 @@ They use fake Win32 implementations, so nothing touches real windows.
 - **Bridge size limits:** the strip carries 54 bytes per frame, which is why chat lines and commands are cut to 27 bytes.
 - **Covered windows** fall back to PrintWindow. That's slower, but works.
 - **Windows only.**
+
+## License
+
+MIT. See [LICENSE](LICENSE).

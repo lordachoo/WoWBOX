@@ -118,12 +118,12 @@ class HotkeyConfig(_Model):
 
 class BroadcastConfig(_Model):
     enabled_on_start: bool = True
-    toggle_key: ChordStr | None = None  # legacy names from the plan; copied into hotkeys
+    toggle_key: ChordStr | None = None  # legacy names; copied into hotkeys
     release_all_key: ChordStr | None = None
     chatguard: bool = True
     chatguard_open_keys: list[ChordStr] = ["Enter", "/"]
     chatguard_close_keys: list[ChordStr] = ["Enter", "Esc"]
-    # How chords with Shift/Ctrl/Alt reach background clients (spike S2 decides):
+    # How chords with Shift/Ctrl/Alt reach background clients:
     #   post        post modifier down/up messages around the key
     #   focus_swap  briefly focus each target and SendInput the chord
     #   strip       send the bare key without modifiers
