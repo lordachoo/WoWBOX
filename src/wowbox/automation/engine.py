@@ -126,6 +126,19 @@ def _show(v: object) -> str:
 
 
 @dataclass
+class QueueItem:
+    """One line of the live queue view: what a rule is doing, or waiting to do, on some characters."""
+    slots: list[int]  # the characters it acts on
+    rule: str
+    kind: str  # "running", "waiting" (its next step waits for a cast / cooldown / another rule) or "queued"
+    who: str = ""  # the chat request it's for
+    detail: str = ""
+    priority: int = 0
+    order: int = 0  # position among the queued requests of its rule (1 = next)
+    first: bool = False  # it holds the turn on its characters: it goes before the other waiting rules
+
+
+@dataclass
 class _Request:
     sender: str
     steps: list[Step]
@@ -240,6 +253,41 @@ class AutomationEngine:
                 why = next((w for _, m, w in per if not m), "")
                 nxt = f"when the condition is true ({why})" if why else "when the condition is true"
         return RuleStatus(state, nxt, progress, last, ready)
+
+    def queue_view(self, now: float) -> list[QueueItem]:
+        """Everything running, waiting and queued right now, for the queue panel."""
+        items: list[QueueItem] = []
+        for rt in self.rules:
+            name, prio = rt.rule.name, rt.rule.priority
+            if rt.running_step is not None:
+                steps = rt.run_steps if rt.run_steps is not None else rt.steps
+                nxt = next((s for s in steps[rt.running_step:] if isinstance(s, (TypeStep, SendStep))), None)
+                slots = sorted(self.source.slots_for(nxt.to)) if nxt else sorted(self._send_slots(rt))
+                what = f"step {min(rt.running_step + 1, len(steps))}/{len(steps)}"
+                if nxt:
+                    what += f": {describe([nxt])}"
+                if rt.wait_reason:
+                    first = any(self._claims.get(s, ("",))[0] == name for s in slots)
+                    items.append(QueueItem(slots, name, "waiting", rt.current_sender or "",
+                                           f"{what} · {rt.wait_reason}", prio, first=first))
+                else:
+                    left = rt.resume_at - now
+                    pause = f" · in {fmt_left(left)}" if left > 0.05 else ""
+                    items.append(QueueItem(slots, name, "running", rt.current_sender or "", what + pause, prio))
+            for i, req in enumerate(rt.pending, 1):
+                age = now - req.queued_at
+                left = self.options.chat_queue_ttl - age
+                items.append(QueueItem(sorted(self._send_slots(rt)), name, "queued", req.sender,
+                                       f"#{i} · asked {fmt_left(age)} ago · expires in {fmt_left(left)}", prio, i))
+        return items
+
+    def _send_slots(self, rt: RuleRuntime) -> set[int]:
+        """The characters a rule's steps go to."""
+        slots: set[int] = set()
+        for step in rt.steps:
+            if isinstance(step, (TypeStep, SendStep)):
+                slots.update(self.source.slots_for(step.to))
+        return slots
 
     def set_enabled(self, value: bool) -> None:
         self.enabled = value

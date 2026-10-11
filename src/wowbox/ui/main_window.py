@@ -9,10 +9,11 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QHBoxLayout, QHeaderView, QLabel, QMainWindow,
-    QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout,
-    QWidget,
+    QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QSplitter, QTableWidget, QTableWidgetItem, QTabWidget,
+    QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
+from ..automation.engine import QueueItem
 from ..config import RouteConfig
 from ..keys import expand_key_spec
 from ..layout import LAYOUT_ORDER
@@ -20,6 +21,7 @@ from ..macro_store import fmt_duration
 
 log = logging.getLogger(__name__)
 
+QUEUE_COLS = ["Character", "State", "Rule", "For", "Detail"]
 AUTO_COLS = ["On", "Name", "Trigger", "Actions", "Status", "Next", "Last fired", "Fired"]
 CLIENT_COLS = ["Slot", "Character", "Label", "Role", "PID", "Window", "Status", "Broadcast", "HP", "Power", "Target",
                "State", "Position", "Bridge"]
@@ -478,13 +480,75 @@ class MainWindow(QMainWindow):
                       "config/automation.yaml. Automation as a whole is switched on in the toolbar and starts in "
                       "dry run (logs only). Kill switch hotkey: " + str(self.c.cfg.hotkeys.automation_kill) + ".")
         hint.setWordWrap(True)
+        # live queue: per character, what's running, waiting and queued
+        self.queue_tree = QTreeWidget()
+        self.queue_tree.setHeaderLabels(QUEUE_COLS)
+        self.queue_tree.setRootIsDecorated(False)
+        self.queue_tree.setUniformRowHeights(True)
+        qh = self.queue_tree.header()
+        qh.setSectionResizeMode(QHeaderView.ResizeToContents)
+        qh.setSectionResizeMode(QUEUE_COLS.index("Detail"), QHeaderView.Stretch)
+        self.queue_empty = QLabel("<span style='color:gray'>Nothing running or queued.</span>")
+        queue_box = QWidget()
+        ql = QVBoxLayout(queue_box)
+        ql.setContentsMargins(0, 0, 0, 0)
+        ql.addWidget(QLabel("<b>Live queue</b> · per character: running now, waiting (for a cast, the global "
+                            "cooldown or a rule with priority) and queued chat requests, in the order they'll go"))
+        ql.addWidget(self.queue_tree)
+        ql.addWidget(self.queue_empty)
+        top = QWidget()
+        tl = QVBoxLayout(top)
+        tl.setContentsMargins(0, 0, 0, 0)
+        tl.addWidget(self.auto_table)
+        tl.addLayout(buttons)
+        split = QSplitter(Qt.Vertical)
+        split.addWidget(top)
+        split.addWidget(queue_box)
+        split.setStretchFactor(0, 3)
+        split.setStretchFactor(1, 2)
         w = QWidget()
         lay = QVBoxLayout(w)
         lay.addWidget(self.auto_status)
-        lay.addWidget(self.auto_table)
-        lay.addLayout(buttons)
+        lay.addWidget(split, 1)
         lay.addWidget(hint)
         return w
+
+    def refresh_queue(self) -> None:
+        """Rebuild the live queue: one group per character, running first, then waiting, then queued."""
+        e, c = self.c.engine, self.c
+        now = time.monotonic()
+        name = lambda s: c.team.clients[s].name if s in c.team.clients else str(s)  # noqa: E731
+        rank = {"running": 0, "waiting": 1, "queued": 2}
+        rows: dict[int, list] = {}
+        for it in e.queue_view(now):
+            for s in it.slots or [0]:
+                rows.setdefault(s, []).append(it)
+        for s, n in c.router.waiting().items():  # typed lines waiting for you to stop typing there
+            rows.setdefault(s, []).append(QueueItem([s], "(typed line)", "waiting", "",
+                                                    f"{n} waiting for you to stop typing / pressing keys there"))
+        lines = []
+        for s in sorted(rows):
+            group = sorted(rows[s], key=lambda i: (rank[i.kind], not i.first, -i.priority, i.order))
+            for k, it in enumerate(group):
+                lines.append((name(s) if s and k == 0 else "" if s else "(no character)", it))
+        sig = [(who, it.rule, it.kind, it.who, it.detail) for who, it in lines]
+        if sig == getattr(self, "_queue_sig", None):
+            return
+        self._queue_sig = sig
+        t = self.queue_tree
+        t.clear()
+        colors = {"running": "#2e7d32", "waiting": "#ef6c00", "queued": "#1565c0"}
+        for who, it in lines:
+            prio = f" (priority {it.priority})" if it.priority else ""
+            row = QTreeWidgetItem([who, it.kind, it.rule + prio, it.who, it.detail])
+            row.setForeground(QUEUE_COLS.index("State"), QColor(colors[it.kind]))
+            if who:
+                f = row.font(0)
+                f.setBold(True)
+                row.setFont(0, f)
+            t.addTopLevelItem(row)
+        t.setVisible(bool(lines))
+        self.queue_empty.setVisible(not lines)
 
     def load_automation(self) -> None:
         from ..automation.actions import describe
@@ -660,6 +724,7 @@ class MainWindow(QMainWindow):
         self.refresh_banner()
         self.refresh_clients()
         self.refresh_automation()
+        self.refresh_queue()
         self.refresh_macros()
         self.status.setText(self.c.status_text())
 

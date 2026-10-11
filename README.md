@@ -857,7 +857,17 @@ The **Automation** tab updates four times a second:
 | **Last fired** | how long ago, e.g. *2m 10s ago*, or *never* |
 | **Fired** | how many times since WoWBox started |
 
-Long triggers and actions are cut off with "…". Hover over them to see all of it. **Timers start when automation is turned on:** a timer never fires the moment you switch automation on, even if it came due while automation was off.
+Long triggers and actions are cut off with "…". Hover over them to see all of it.
+
+**Live queue** (under the rules) shows, per character, everything that's happening there, in the order it will go:
+
+| State | Means | Detail shows |
+|---|---|---|
+| **running** (green) | a rule is going through its steps | the next step, and how long until it, e.g. *step 3/9: type '/cast Might' -> Kunth · in 1s* |
+| **waiting** (orange) | its next step is held back | why: *Kunth casting*, *global cooldown after 'buffs'*, or *'totems' goes first* (priority) |
+| **queued** (blue) | a chat request waiting for its rule to be free | its place, how long ago it was asked and when it expires, e.g. *#2 · asked 4s ago · expires in 56s* |
+
+The rule holding a character's turn is listed first among the waiting ones; a rule's priority is shown next to its name. Typed lines waiting for you to stop typing in a window are listed too. **Timers start when automation is turned on:** a timer never fires the moment you switch automation on, even if it came due while automation was off.
 
 ### Common to all rules
 

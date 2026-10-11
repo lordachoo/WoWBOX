@@ -447,3 +447,18 @@ def test_priority_goes_first_when_rules_wait_for_the_same_character():
             e.tick(t)
         assert typed(sender)[1] == f"/cast {first}", prio
         assert len(typed(sender)) == 3
+
+
+def test_queue_view_shows_running_waiting_and_queued():
+    heal = {"name": "heal", "chat": {"contains": ["heal"], "heard_by": "Kunth"},
+            "do": {"type": "/cast [@{sender}] Healing Wave", "to": "Kunth"}, "priority": 5}
+    e, sender = engine([BUFF, heal])
+    e.on_chat(3, whisper(sender="Tinkerdawn", text="buff"), now=0)  # buffs: Kings now, Might in 1.5 s
+    e.on_chat(3, whisper(sender="Gnope", text="buff"), now=0.2)
+    e.on_chat(3, whisper(sender="Gnope", text="heal"), now=0.3)  # waits out the global cooldown
+    view = {(i.rule, i.kind): i for i in e.queue_view(0.5)}
+    assert view[("buffs", "running")].who == "Tinkerdawn" and "in 1s" in view[("buffs", "running")].detail
+    assert view[("heal", "waiting")].slots == [3] and "global cooldown" in view[("heal", "waiting")].detail
+    assert view[("heal", "waiting")].priority == 5
+    q = view[("buffs", "queued")]
+    assert q.who == "Gnope" and q.order == 1 and q.slots == [3] and "expires in" in q.detail
