@@ -7,8 +7,10 @@ import time
 from pathlib import Path
 from typing import Callable
 
+from pydantic import ValidationError
 from PySide6.QtCore import QObject, QTimer, Signal
 
+from . import settings
 from .activity import ActivityFeed
 from .automation import AutomationEngine
 from .automation.actions import flatten
@@ -23,7 +25,7 @@ from .follow import FollowManager
 from .stack import Stacker, StackManager, StackResult, apart
 from .bridge import BridgePoller, ChatEvent, ClientState
 from .config import AppConfig, RouteConfig, load_config
-from .config_text import update_team_yaml
+from .config_text import set_settings, update_team_yaml
 from .keys import parse_chord
 from .launcher import Launcher
 from .layout import LayoutManager
@@ -216,6 +218,52 @@ class Controller(QObject):
             self.overlay.hide()
             self._overlay_timer.stop()
 
+    # ------------------------------------------------------------------ settings (the Settings tab)
+    def apply_setting(self, section: str, key: str, raw: object) -> str | None:
+        """Change one setting now. The running parts read these same objects, so it applies at once.
+        Returns a problem (the value is then left as it was), or None."""
+        model = getattr(self.cfg, section)
+        try:
+            new = type(model).model_validate({**model.model_dump(), key: raw})
+        except ValidationError as e:
+            return "; ".join(err["msg"].removeprefix("Value error, ") for err in e.errors())
+        setattr(model, key, getattr(new, key))
+        if section == "stack":
+            self.stacker.load(model)
+            self.stack.cfg = model
+            self._apply_stack_cfg()
+        elif section == "broadcast" and key == "chatguard":
+            self.chatguard.enabled = model.chatguard
+        elif section == "automation_options" and key == "tick_hz":
+            self._auto_timer.setInterval(int(1000 / max(1.0, model.tick_hz)))
+        log.info("setting %s.%s = %s", section, key, settings.show(model, key))
+        self.sig_changed.emit()
+        return None
+
+    def unsaved_settings(self) -> list[settings.Setting]:
+        """Settings whose value now differs from team.yaml."""
+        try:
+            disk = load_config(self.cfg_path)
+        except Exception:
+            return list(settings.ALL)
+        return [s for s in settings.ALL
+                if settings.show(getattr(self.cfg, s.section), s.key) != settings.show(getattr(disk, s.section), s.key)]
+
+    def save_settings(self) -> list[str]:
+        """Write the changed settings into team.yaml, in place (comments stay). Returns what was written."""
+        changes = {(s.section, s.key): settings.show(getattr(self.cfg, s.section), s.key)
+                   for s in self.unsaved_settings()}
+        done = set_settings(self.cfg_path, changes) if changes else []
+        if done:
+            log.info("settings saved to %s: %s", self.cfg_path.name, ", ".join(done))
+        return done
+
+    def revert_settings(self) -> None:
+        """Put every setting back to what team.yaml says."""
+        disk = load_config(self.cfg_path)
+        for s in self.unsaved_settings():
+            self.apply_setting(s.section, s.key, getattr(getattr(disk, s.section), s.key))
+
     def save_config(self) -> None:
         """Write the route table, leader and slot characters into team.yaml, in place: the rest of the file,
         comments included, stays as you wrote it."""
@@ -236,6 +284,12 @@ class Controller(QObject):
             log.error("config not reloaded: %s", e)
             return
         self.cfg.routes = cfg.routes
+        for section in ("automation_options", "broadcast"):  # the running parts hold these objects: update in place
+            live, new = getattr(self.cfg, section), getattr(cfg, section)
+            for k in type(new).model_fields:
+                setattr(live, k, getattr(new, k))
+        self.chatguard.enabled = self.cfg.broadcast.chatguard
+        self._auto_timer.setInterval(int(1000 / max(1.0, self.cfg.automation_options.tick_hz)))
         self.cfg.automation = cfg.automation
         self.cfg.macros = cfg.macros
         self.cfg.hotkeys = cfg.hotkeys
@@ -253,12 +307,14 @@ class Controller(QObject):
         self.chatguard.open_keys = self._chords(cfg.broadcast.chatguard_open_keys)
         self.chatguard.close_keys = self._chords(cfg.broadcast.chatguard_close_keys)
         self.engine.load(cfg.automation)
-        log.info("config reloaded (routes, hotkeys, macros, team, follow, automation). Restart for other sections.")
+        log.info("config reloaded (routes, hotkeys, macros, team, follow, stack, broadcast, automation). "
+                 "Restart for other sections.")
         self.sig_changed.emit()
         if hasattr(self, "window"):
             self.window.load_routes()
             self.window.load_automation()
             self.window.load_macros()
+            self.window.settings_tab.load()
 
     # ------------------------------------------------------------------ callbacks
     def _on_hotkey(self, name: str) -> None:

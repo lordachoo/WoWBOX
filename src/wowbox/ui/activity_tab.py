@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 
 from ..automation.actions import SendStep, TypeStep, describe
 from ..automation.engine import QueueItem, fmt_left
+from .settings_tab import summary
 
 CHAR_COLS = ["Character", "State", "Queue", "Last action", "By", "When"]
 QUEUE_COLS = ["Character", "State", "Rule / macro", "For", "Detail"]
@@ -38,7 +39,7 @@ def _item(text: str, color: str | None = None, tip: str | None = None) -> QTable
 
 
 class ActivityTab(QWidget):
-    def __init__(self, controller) -> None:
+    def __init__(self, controller, on_settings=lambda: None) -> None:
         super().__init__()
         self.c = controller
         self._queue_sig = None
@@ -109,7 +110,11 @@ class ActivityTab(QWidget):
         split.addWidget(section(filters, self.feed))
         split.setStretchFactor(0, 1)
         split.setStretchFactor(1, 1)
+        self.summary = QLabel()
+        self.summary.setWordWrap(True)
+        self.summary.linkActivated.connect(lambda _: on_settings())
         lay = QVBoxLayout(self)
+        lay.addWidget(self.summary)
         lay.addWidget(QLabel("<b>Characters</b> · state, and the last thing a rule or macro sent each one"))
         lay.addWidget(self.chars)
         lay.addWidget(split, 1)
@@ -142,6 +147,10 @@ class ActivityTab(QWidget):
     # ------------------------------------------------------------------ refresh
     def refresh(self, force: bool = False) -> None:
         now = time.monotonic()
+        text = (f"<b>In play:</b> {summary(self.c.cfg)} · <a href='settings'>change in Settings</a>"
+                + ("" if self.c.engine.enabled else " · <b>automation is OFF</b>"))
+        if self.summary.text() != text:
+            self.summary.setText(text)
         items = self.queue_items(now)
         self._refresh_chars(items, now)
         self._refresh_queue(items, force)

@@ -1,3 +1,4 @@
+import pytest
 import difflib
 import shutil
 from pathlib import Path
@@ -79,3 +80,44 @@ def test_empty_routes_and_quoting(tmp_path):
     cfg.routes = []
     update_team_yaml(p, cfg)
     assert load_config(p).routes == [] and "automation" in yaml.safe_load(p.read_text(encoding="utf-8"))
+
+
+SETTINGS_YAML = """\
+# my team
+broadcast:
+  chatguard: true               # pause broadcasting while you type
+  focus_swap_dwell: 40ms
+
+follow:
+  mirror_max_distance_yards: 40
+
+automation_options:
+  enabled_on_start: false       # automation always starts OFF
+  dry_run: true
+"""
+
+
+def test_set_settings_edits_in_place_and_keeps_comments(tmp_path):
+    from wowbox.config_text import set_settings
+    p = tmp_path / "team.yaml"
+    p.write_text(SETTINGS_YAML, encoding="utf-8")
+    done = set_settings(p, {("broadcast", "chatguard"): "false", ("follow", "mirror_max_distance_yards"): "60",
+                            ("automation_options", "chat_queue"): "3", ("stack", "tolerance_yards"): "0.2"})
+    text = p.read_text(encoding="utf-8")
+    assert "  chatguard: false              # pause broadcasting while you type\n" in text  # comment column kept
+    assert "  mirror_max_distance_yards: 60\n" in text
+    assert "  dry_run: true\n  chat_queue: 3\n" in text  # a missing key goes at the end of its section
+    assert text.endswith("stack:\n  tolerance_yards: 0.2\n")  # a missing section is added
+    assert "# my team" in text and "# automation always starts OFF" in text
+    assert sorted(done) == ["automation_options.chat_queue", "broadcast.chatguard",
+                            "follow.mirror_max_distance_yards", "stack.tolerance_yards"]
+    assert (tmp_path / "team.yaml.bak").read_text(encoding="utf-8") == SETTINGS_YAML
+
+
+def test_set_settings_refuses_a_value_that_wouldnt_load(tmp_path):
+    from wowbox.config_text import set_settings
+    p = tmp_path / "team.yaml"
+    p.write_text(SETTINGS_YAML, encoding="utf-8")
+    with pytest.raises(Exception):
+        set_settings(p, {("follow", "mirror_max_distance_yards"): "far"})
+    assert p.read_text(encoding="utf-8") == SETTINGS_YAML

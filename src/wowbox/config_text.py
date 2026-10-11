@@ -136,3 +136,59 @@ def update_team_yaml(path: str | Path, cfg: AppConfig) -> list[str]:
     path.with_suffix(path.suffix + ".bak").write_text(text, encoding="utf-8")
     path.write_text(new_text, encoding="utf-8")
     return changed
+
+
+def _set_value(lines: list[str], section: str, key: str, value: str) -> str | None:
+    """Set `section.key: value` in place, keeping the line's comment where it was. Adds the key (or the
+    section) if missing. Returns a problem, or None."""
+    span = _block(lines, section)
+    if span is None:
+        if lines and lines[-1].strip():
+            lines.append("\n")
+        lines += [f"{section}:\n", f"  {key}: {value}\n"]
+        return None
+    start, end = span
+    if re.match(rf"{re.escape(section)}:\s*[\[{{]", lines[start]):
+        return f"{section} is written in flow style ({{ ... }})"
+    body = [i for i in range(start + 1, end) if lines[i].strip() and not lines[i].lstrip().startswith("#")]
+    indent = min((len(lines[i]) - len(lines[i].lstrip(" ")) for i in body), default=2)
+    pat = re.compile(rf"^( {{{indent}}}){re.escape(key)}:([ \t]*)(.*?)([ \t]+#.*)?$")
+    for i in body:
+        line = lines[i].rstrip("\n")
+        m = pat.match(line)
+        if not m:
+            continue
+        head = f"{m.group(1)}{key}:{m.group(2) or ' '}{value}"
+        if m.group(4):
+            col = m.start(4) + (len(m.group(4)) - len(m.group(4).lstrip()))  # where the comment's # was
+            head += " " * max(1, col - len(head)) + m.group(4).lstrip()
+        lines[i] = head + "\n"
+        return None
+    last = body[-1] if body else start
+    lines.insert(last + 1, f"{' ' * indent}{key}: {value}\n")
+    return None
+
+
+def set_settings(path: str | Path, changes: dict[tuple[str, str], str]) -> list[str]:
+    """Write {(section, key): yaml_value_text} into team.yaml in place: only those lines change, comments stay.
+    Returns the keys written. Raises ValueError when the result wouldn't load (the file is left alone)."""
+    path = Path(path)
+    text = path.read_text(encoding="utf-8")
+    lines = text.splitlines(keepends=True)
+    if lines and not lines[-1].endswith("\n"):
+        lines[-1] += "\n"
+    done, problems = [], []
+    for (section, key), value in changes.items():
+        if why := _set_value(lines, section, key, value):
+            problems.append(f"{section}.{key}: {why}")
+        else:
+            done.append(f"{section}.{key}")
+    if problems:
+        raise ValueError("couldn't write " + "; ".join(problems) + " (edit team.yaml by hand)")
+    if not done:
+        return []
+    new_text = "".join(lines)
+    AppConfig.model_validate(yaml.safe_load(new_text) or {})  # never write a file that doesn't load
+    path.with_suffix(path.suffix + ".bak").write_text(text, encoding="utf-8")
+    path.write_text(new_text, encoding="utf-8")
+    return done

@@ -195,6 +195,7 @@ On start, WoWBox attaches to every running `Wow.exe` window. It puts each window
 | **Macros** | Your macros with their hotkeys, whether they're running, and their steps. **New / Edit / Duplicate / Delete** open the macro editor (double-click edits too). Run/Stop, Stop all. |
 | **Automation** | Every rule with its trigger and actions, plus live columns: **Status** (waiting, cooldown 8s, running step 2/4, disabled, automation OFF), **Next** (timers get a countdown bar, e.g. *in 12m 05s*; state rules say whether the condition is true now and why not; chat rules wait for a line), **Last fired** and **Fired** (count). **New / Edit / Duplicate / Delete** open the rule editor (double-click edits too). The *On* box enables or disables a rule, and the change is saved at once. |
 | **Activity** | The live dashboard of rules, macros and `/bb` commands: each character's state and last action, the live queue, and a feed of recent activity. Section 13, *The Activity tab*. |
+| **Settings** | The options that tune automation, the typing guard, follow and stacking, each with an explanation. Changes apply at once; **Save to team.yaml** keeps them (only those lines change, comments stay), **Revert** goes back to the file. Section 15, *The Settings tab*. |
 | **Log** | Everything WoWBox does: keys typed, rules fired, chat lines seen, `/bb` commands. The same goes to `logs\wowbox.log`. |
 
 A tray icon offers the same switches. Its dot is green while broadcasting and red while not, with a yellow ring while automation is on. Closing the window quits WoWBox.
@@ -1112,6 +1113,27 @@ In the editor: trigger *State*, Who `3 (Kunth)`, condition `AFK = yes`, step *Pr
 Ctrl+Alt+L cycles the layouts. In main_thumbs and tabs, all clients share one size and position, so swapping only raises a window. Nothing is resized, which avoids a D3D device reset.
 
 **Sharpness:** the game renders at its own resolution (`gxResolution`), and Windows stretches that into the window. If the picture looks blurry or squashed, set the in-game resolution to the window size. Alternatively, set `client.resolution` and `client.set_windowed_cvars: true` so `Config.wtf` is written before launch (a backup is kept).
+
+### The Settings tab
+
+The settings you're most likely to tune while playing, grouped, each with a one-line explanation:
+
+| Group | Settings |
+|---|---|
+| **Automation: queue and turn-taking** | queue per chat rule, queued request expiry, gap between rules on one character, wait for a cast in progress (and the most it waits) |
+| **Automation: who counts** | ignore dead characters, ignore characters too far away, pause rules on an unreadable client |
+| **Automation: start-up and speed** | automation ON at start, dry run at start, checks per second |
+| **Typing guard** | pause broadcasting while you type, how long typed lines wait for you, quiet time after your last key, broadcast only from WoW windows, how Shift/Ctrl/Alt chords reach other clients |
+| **Follow and mirroring** | only mirror to followers who are with you, max distance (also used by *ignore characters too far away*), re-follow and its timing |
+| **Stacking** | position and facing tolerance, max distance, timeout, re-stack when you stop moving |
+
+- **Live:** a change applies the moment you make it; the engine, router and stacker read these same values.
+- **Wrong input** (e.g. `soon` as a duration) turns the box red and isn't applied. The message says why.
+- **Not saved yet:** changed settings are shown in **bold** and listed at the top until you save. They're lost on restart.
+- **Save to team.yaml** writes only those lines, in place. A comment at the end of a line stays where it was, and a setting that isn't in the file yet is added at the end of its section. The old file is kept as `team.yaml.bak`.
+- **Revert to team.yaml** puts every setting back to what the file says.
+- **Reload config** now also re-reads `broadcast` and `automation_options`, so hand edits to them no longer need a restart.
+- **The Activity tab** shows the ones that explain the queue on one line at the top (*In play: queue 5 per rule · expires 1m · rule gap 1.5s · …*), with a link to this tab.
 
 ## 16. Configuration reference
 

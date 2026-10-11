@@ -18,6 +18,7 @@ from ..keys import expand_key_spec
 from ..layout import LAYOUT_ORDER
 from ..macro_store import fmt_duration
 from .activity_tab import ActivityTab
+from .settings_tab import SettingsTab
 
 log = logging.getLogger(__name__)
 
@@ -53,8 +54,12 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self._build_routes_tab(), "Routes")
         self.tabs.addTab(self._build_macros_tab(), "Macros")
         self.tabs.addTab(self._build_automation_tab(), "Automation")
-        self.activity_tab = ActivityTab(self.c)
+        self.activity_tab = ActivityTab(self.c, on_settings=lambda: self.tabs.setCurrentWidget(self.settings_tab))
         self.tabs.addTab(self.activity_tab, "Activity")
+        self.settings_tab = SettingsTab(self.c)
+        self.tabs.addTab(self.settings_tab, "Settings")
+        self.tabs.currentChanged.connect(
+            lambda _: self.tabs.currentWidget() is self.settings_tab and self.settings_tab.load())
         self.log_view = QPlainTextEdit(readOnly=True)
         self.log_view.setMaximumBlockCount(5000)
         self.log_view.setFont(QFont("Consolas", 9))
