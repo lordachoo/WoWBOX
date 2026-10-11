@@ -612,10 +612,26 @@ Useful chat commands:
 - **The same lines work as team commands,** within 27 characters: `/bb all use item:12345`, `/bb to Gnope cast Shadow Bolt`, `/bb to class:SHAMAN cast Ghost Wolf`.
 - **Typed lines or keys?** Typing a line takes about 0.2 s. Use typed lines for situational things: portals, mounts, buff rounds, a heal on a whisper. For your fighting rotation, use action bar keys with broadcasting, which is instant.
 
-**To find an item's ID**, run this in any client and replace the name:
+**To find an item's ID**, list your bags. Each line shows the bag, the slot, the item ID and the item:
 ```
-/run print((select(2, GetItemInfo("Portal Stone of Learning")) or "not in your bags/cache"):match("item:(%d+)") or "?")
+/run for b=0,4 do for s=1,GetContainerNumSlots(b) do local l=GetContainerItemLink(b,s) if l then print(b,s,l:match("item:(%d+)"),l) end end end
 ```
+`0 3 19019 [Thunderfury]` means bag 0, slot 3, ID 19019: use `/use item:19019`, or `/use 0 3` for that bag slot. For gear you're wearing (slots 1–19):
+```
+/run for i=1,19 do local l=GetInventoryItemLink("player",i) if l then print(i,l:match("item:(%d+)"),l) end end
+```
+
+**Equipping (a right-click on armor or a weapon):**
+
+| Line | Does |
+|---|---|
+| `/equip Thunderfury`, `/equip item:19019` | Equip by name or ID, into the item's usual slot. |
+| `/equipslot 17 Some Shield` | Into a given slot: 16 main hand, 17 off hand, 13/14 trinkets, 11/12 rings. |
+| `/use item:19019` or `/use 0 3` | Same as a right-click in your bags: armor and weapons get equipped. |
+| `/use 13` | Use what's **equipped** in slot 13, e.g. an on-use trinket. |
+| `/equipset Tank` | Put on a saved Equipment Manager set. |
+
+Armor can't be changed in combat; weapons and shields can.
 
 More slash commands for typed steps (targeting, `/startattack`, pets, totems, conditionals, `/run` checks): section 14.
 
@@ -957,9 +973,9 @@ Map ID, position and facing. `0 0` for x and y means this place has no coordinat
 Lists the buffs on this character with their exact names, to copy into `/cast` lines.
 
 ```
-/run print((select(2, GetItemInfo("Portal Stone of Learning")) or "not cached"):match("item:(%d+)") or "?")
+/run for b=0,4 do for s=1,GetContainerNumSlots(b) do local l=GetContainerItemLink(b,s) if l then print(b,s,l:match("item:(%d+)"),l) end end end
 ```
-An item's ID, for short `/use item:12345` lines.
+Every item in your bags with its bag, slot and ID, for `/use item:12345`, `/equip item:12345` or `/use <bag> <slot>`. Equipping commands are in section 12, *Using items and casting spells*.
 
 ### Recipes
 
