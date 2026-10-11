@@ -112,7 +112,8 @@ def split_list(text: str) -> list[str] | None:
 
 def build_rule(name: str, enabled: bool, cooldown: str, trigger: str, *, who: str = "any",
                conditions: list[dict] | None = None, every: str = "", channels: list[str] | None = None,
-               senders: str = "", contains: str = "", heard_by: str = "all", steps: list[dict]) -> AutomationRule:
+               senders: str = "", contains: str = "", heard_by: str = "all", queue: str = "",
+               steps: list[dict]) -> AutomationRule:
     """Editor values -> AutomationRule. Raises ValueError with a readable message."""
     if not name.strip():
         raise ValueError("Give the rule a name.")
@@ -146,6 +147,12 @@ def build_rule(name: str, enabled: bool, cooldown: str, trigger: str, *, who: st
         if c := split_list(contains):
             chat["contains"] = c
         data["chat"] = chat
+        if (q := queue.strip().lower()) not in ("", "default"):
+            if q == "off":
+                q = "0"
+            if not q.isdigit():
+                raise ValueError("Queue: a number of requests (e.g. 5), off, or default.")
+            data["queue"] = int(q)
     data["do"], step_rows = rows_to_do(steps)
     try:
         return AutomationRule.model_validate(data)
@@ -317,6 +324,14 @@ class RuleEditor(QDialog):
         cl.addRow("From", self.senders)
         cl.addRow("Containing", self.contains)
         cl.addRow("Heard by", self.heard_by)
+        self.queue = QComboBox()
+        self.queue.setEditable(True)
+        self.queue.addItems(["default", "off", "1", "3", "5", "10"])
+        q = rule.queue if rule else None
+        self.queue.setCurrentText("default" if q is None else "off" if q == 0 else str(q))
+        self.queue.setToolTip("Requests that come in while this rule is busy wait their turn, one per person. "
+                              "default: automation_options.chat_queue (5). off: they're skipped.")
+        cl.addRow("Queue while busy", self.queue)
 
         # steps
         self.steps = StepTable(targets, macro_rows(rule) if rule else None)
@@ -380,7 +395,7 @@ class RuleEditor(QDialog):
             who=self.who.currentText(), conditions=self.conditions.read(), every=self.every.text(),
             channels=[ch for ch, cb in self.channel_boxes.items() if cb.isChecked()],
             senders=self.senders.text(), contains=self.contains.text(), heard_by=self.heard_by.currentText(),
-            steps=self.steps.read())
+            queue=self.queue.currentText(), steps=self.steps.read())
         if rule.name in self.other_names:
             raise ValueError(f"There's already a rule called {rule.name!r}.")
         return rule
@@ -392,7 +407,7 @@ class RuleEditor(QDialog):
                 who=self.who.currentText(), conditions=self.conditions.read(), every=self.every.text(),
                 channels=[ch for ch, cb in self.channel_boxes.items() if cb.isChecked()],
                 senders=self.senders.text(), contains=self.contains.text(),
-                heard_by=self.heard_by.currentText(), steps=self.steps.read())
+                heard_by=self.heard_by.currentText(), queue=self.queue.currentText(), steps=self.steps.read())
         except ValueError as e:
             self.check.setText(f"<span style='color:gray'>Not complete yet: {e}</span>")
             return

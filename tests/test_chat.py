@@ -261,3 +261,96 @@ def test_most_specific_keyword_wins(text, fired):
     for slot in (1, 2, 3):
         e.on_chat(slot, whisper(text=text), now=0)
     assert [t[1].removeprefix("/say ") for t in sender.sent] == fired
+
+
+# ---------------------------------------------------------------- request queue and spacing between rules
+BUFF = {"name": "buffs", "chat": {"channel": ["whisper", "party"], "contains": ["buff"], "heard_by": "Kunth"},
+        "do": {"sequence": [{"type": "/cast [@{sender}] Kings", "to": "Kunth"}, {"wait": "1.5s"},
+                            {"type": "/cast [@{sender}] Might", "to": "Kunth"}]},
+        "cooldown": "1s"}
+
+
+def typed(sender):
+    return [t[1] for t in sender.sent if t[0] == "type"]
+
+
+def run(e, start, end, step=0.1):
+    t = start
+    while t <= end + 1e-9:
+        e.tick(round(t, 3))
+        t += step
+
+
+def test_three_people_asking_are_served_in_turn():
+    e, sender = engine([BUFF])
+    e.on_chat(3, whisper(sender="Tinkerdawn", text="buff pls"), now=0)
+    e.on_chat(3, whisper(sender="Gnope", text="buff me"), now=0.5)
+    e.on_chat(3, whisper(sender="Randompug", text="buffs?"), now=0.7)
+    assert [q.sender for q in e.rules[0].pending] == ["Gnope", "Randompug"]
+    st = e.status(e.rules[0], 0.8)
+    assert "for Tinkerdawn" in st.state and "queued: Gnope, Randompug" in st.state and st.next == "next: Gnope"
+    run(e, 0, 10)
+    assert typed(sender) == ["/cast [@Tinkerdawn] Kings", "/cast [@Tinkerdawn] Might",
+                             "/cast [@Gnope] Kings", "/cast [@Gnope] Might",
+                             "/cast [@Randompug] Kings", "/cast [@Randompug] Might"]
+    assert not e.rules[0].pending
+
+
+def test_queue_skips_repeats_and_respects_its_limits():
+    e, sender = engine([{**BUFF, "queue": 1}], chat_queue_ttl=5)
+    e.on_chat(3, whisper(sender="Tinkerdawn", text="buff"), now=0)
+    e.on_chat(3, whisper(sender="Tinkerdawn", text="buff now"), now=0.5)  # already being served
+    e.on_chat(3, whisper(sender="Gnope", text="buff"), now=0.6)
+    e.on_chat(3, whisper(sender="Gnope", text="buff again"), now=0.7)  # already queued
+    e.on_chat(3, whisper(sender="Randompug", text="buff"), now=0.8)  # queue: 1 -> full
+    assert [q.sender for q in e.rules[0].pending] == ["Gnope"]
+    run(e, 0, 1.4)
+    e.on_chat(3, whisper(sender="Tinkerdawn", text="buff"), now=1.6)  # just served, cooling down: spam
+    assert [q.sender for q in e.rules[0].pending] == ["Gnope"]
+
+
+def test_queued_requests_expire_and_queueing_can_be_off():
+    e, sender = engine([BUFF], chat_queue_ttl=2)
+    e.on_chat(3, whisper(sender="Tinkerdawn", text="buff"), now=0)
+    e.on_chat(3, whisper(sender="Gnope", text="buff"), now=0.1)
+    e.tick(1.5)  # Tinkerdawn's second cast; the run ends
+    e.tick(5)  # off cooldown, but Gnope waited 4.9 s > 2 s
+    assert typed(sender) == ["/cast [@Tinkerdawn] Kings", "/cast [@Tinkerdawn] Might"]
+    e2, sender2 = engine([{**BUFF, "queue": 0}])
+    e2.on_chat(3, whisper(sender="Tinkerdawn", text="buff"), now=0)
+    e2.on_chat(3, whisper(sender="Gnope", text="buff"), now=0.1)
+    assert not e2.rules[0].pending
+
+
+def test_a_heal_goes_between_buff_casts_instead_of_colliding():
+    heal = {"name": "heal", "chat": {"contains": ["heal"], "heard_by": "Kunth"},
+            "do": {"type": "/cast [@{sender}] Healing Wave", "to": "Kunth"}}
+    buffs3 = {**BUFF, "do": {"sequence": [{"type": "/cast Kings", "to": "Kunth"}, {"wait": "1.5s"},
+                                          {"type": "/cast Might", "to": "Kunth"}, {"wait": "1.5s"},
+                                          {"type": "/cast Wisdom", "to": "Kunth"}]}}
+    e, sender = engine([buffs3, heal])
+    times = {}
+    real = sender.type_text
+    now = [0.0]
+    sender.type_text = lambda text, to: times.setdefault(text, now[0]) is not None and real(text, to)
+    e.on_chat(3, whisper(sender="Gnope", text="buff"), now=0)
+    now[0] = 0.5
+    e.on_chat(3, whisper(sender="Tinkerdawn", text="heal me"), now=0.5)  # Kunth cast Kings 0.5 s ago
+    t = 0.5
+    while t < 8:
+        t = round(t + 0.05, 2)
+        now[0] = t
+        e.tick(t)
+    assert typed(sender) == ["/cast Kings", "/cast [@Tinkerdawn] Healing Wave", "/cast Might", "/cast Wisdom"]
+    assert times["/cast [@Tinkerdawn] Healing Wave"] == pytest.approx(1.5, abs=0.06)  # after Kings' cooldown
+    assert times["/cast Might"] == pytest.approx(3.0, abs=0.06)  # the buffs make room for it
+    assert times["/cast Wisdom"] == pytest.approx(4.5, abs=0.06)
+
+
+def test_rule_gap_off_lets_rules_overlap():
+    heal = {"name": "heal", "chat": {"contains": ["heal"], "heard_by": "Kunth"},
+            "do": {"type": "/cast Healing Wave", "to": "Kunth"}}
+    e, sender = engine([BUFF, heal], rule_gap=0)
+    e.on_chat(3, whisper(sender="Gnope", text="buff"), now=0)
+    e.on_chat(3, whisper(sender="Tinkerdawn", text="heal"), now=0.2)
+    assert typed(sender) == ["/cast [@Gnope] Kings", "/cast Healing Wave"]

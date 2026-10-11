@@ -20,7 +20,8 @@ RULES = [
      "do": {"sequence": [{"send": "F5", "to": "all"}, {"wait": "1.5s"}, {"send": "F6", "to": "all"}]}},
     {"name": "heal-on-whisper",
      "chat": {"channel": "whisper", "sender": ["Tinkerdawn", "Gnope"], "contains": ["heal"], "heard_by": "Kunth"},
-     "do": {"sequence": [{"type": "/cast [@{sender}] Healing Wave", "to": "Kunth"}]}, "cooldown": "3s"},
+     "do": {"sequence": [{"type": "/cast [@{sender}] Healing Wave", "to": "Kunth"}]}, "cooldown": "3s",
+     "queue": 0},
     {"name": "chain-if-free",
      "chat": {"channel": ["whisper", "party"], "contains": ["chain"], "heard_by": "Kunth"},
      "when": {"slot": "any", "casting": False, "health_pct_gte": 50.5},
@@ -49,6 +50,7 @@ def rules():
 
 def key(r: AutomationRule):
     return (r.name, r.enabled, r.when and r.when.model_dump(), r.every, r.chat and r.chat.model_dump(), r.cooldown,
+            r.queue,
             [s.model_dump() for s in flat_steps(r.do)])
 
 
@@ -254,3 +256,17 @@ def test_turning_automation_on_restarts_timers():
     assert e.rules[0].fire_count == 0
     e.tick(5000 + 1500)
     assert e.rules[0].fire_count == 1
+
+
+@pytest.mark.parametrize("text,value", [("default", None), ("off", 0), ("3", 3), ("", None)])
+def test_editor_queue_setting(qapp, text, value):
+    dlg, _ = editor(qapp, rules()[3])
+    dlg.queue.setCurrentText(text)
+    assert dlg.build().queue == value
+
+
+def test_editor_queue_rejects_words(qapp):
+    dlg, _ = editor(qapp, rules()[3])
+    dlg.queue.setCurrentText("lots")
+    with pytest.raises(ValueError, match="Queue"):
+        dlg.build()

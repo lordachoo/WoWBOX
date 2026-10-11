@@ -6,6 +6,7 @@ remember which step they're on and when to resume.
 from __future__ import annotations
 
 import logging
+from collections import deque
 import operator
 from dataclasses import dataclass, field
 from typing import Callable, Protocol
@@ -20,6 +21,7 @@ log = logging.getLogger(__name__)
 OPS: dict[str, Callable[[object, object], bool]] = {
     "_lt": operator.lt, "_lte": operator.le, "_gt": operator.gt, "_gte": operator.ge, "_ne": operator.ne,
 }
+CLAIM_RECHECK = 0.05  # a step queued behind another rule's waiting step looks again this soon
 CHAT_DEDUPE = 2.0  # the same party/raid line heard by several of your clients fires a rule once
 
 
@@ -120,6 +122,14 @@ def _show(v: object) -> str:
 
 
 @dataclass
+class _Request:
+    sender: str
+    steps: list[Step]
+    why: str
+    queued_at: float
+
+
+@dataclass
 class RuleRuntime:
     rule: AutomationRule
     steps: list[Step]
@@ -130,6 +140,9 @@ class RuleRuntime:
     resume_at: float = 0.0
     fire_count: int = 0
     run_steps: list[Step] | None = None  # steps with chat placeholders filled in, for the current run
+    pending: deque = field(default_factory=deque)  # chat requests waiting their turn: _Request
+    current_sender: str | None = None  # whose request the current run is for (chat rules)
+    last_sender: str | None = None  # whose request the last run was for: cooldown still stops their repeats
 
     @property
     def enabled(self) -> bool:
@@ -153,6 +166,8 @@ class AutomationEngine:
         self._chat_seen: dict[tuple, float] = {}
         self.rules: list[RuleRuntime] = []
         self.paused_rules: set[str] = set()  # e.g. while a rule is open in the editor
+        self._slot_last: dict[int, tuple[float, str]] = {}  # slot -> (time, rule) of the last step sent there
+        self._claims: dict[int, str] = {}  # slot -> the rule first in line for it (waiting out rule_gap)
         self.load(rules)
 
     def load(self, rules: list[AutomationRule]) -> None:
@@ -176,9 +191,12 @@ class AutomationEngine:
             return RuleStatus("disabled", "", None, last)
         if r.name in self.paused_rules:
             return RuleStatus("paused (open in the editor)", "", None, last)
+        queued = f" · queued: {', '.join(q.sender for q in rt.pending)}" if rt.pending else ""
         if rt.running_step is not None:
             steps = rt.run_steps if rt.run_steps is not None else rt.steps
-            return RuleStatus(f"running step {rt.running_step}/{len(steps)}", "", None, last)
+            who = f" for {rt.current_sender}" if rt.current_sender else ""
+            nxt = f"next: {rt.pending[0].sender}" if rt.pending else ""
+            return RuleStatus(f"running step {rt.running_step}/{len(steps)}{who}{queued}", nxt, None, last)
         cooling = r.cooldown - (now - rt.last_fired) if rt.last_fired is not None and r.cooldown else 0.0
         if not self.enabled:
             state = "automation OFF"
@@ -188,6 +206,7 @@ class AutomationEngine:
             state = f"cooldown {fmt_left(cooling)}"
         else:
             state = "waiting"
+        state += queued
         ready = False
         progress = None
         if r.every is not None:
@@ -198,6 +217,8 @@ class AutomationEngine:
                 left = rt.next_due - now
                 nxt = f"in {fmt_left(left)}" if left > 0 else "now"
                 progress = min(1.0, max(0.0, 1 - left / r.every))
+        elif r.chat is not None and rt.pending:
+            nxt = f"next: {rt.pending[0].sender}" + (f", after the cooldown ({fmt_left(cooling)})" if cooling > 0 else "")
         elif r.chat is not None:
             nxt = "on a matching chat line"
             if r.when is not None:
@@ -218,6 +239,8 @@ class AutomationEngine:
         for rt in self.rules:
             if not value:
                 rt.running_step = None
+                rt.pending.clear()
+                self._release(rt)
             else:
                 rt.next_due = None  # timers start counting when automation is turned on, never fire at once
         self._event(f"automation {'ON' if value else 'OFF'}{' (dry run)' if value and self.dry_run else ''}")
@@ -287,11 +310,15 @@ class AutomationEngine:
         for rt in self.rules:
             if rt.rule.name in self.blocked:
                 rt.running_step = None
+                self._release(rt)
                 continue
             if rt.running_step is not None:
                 self._advance(rt, now)
                 continue
-            if not rt.enabled or rt.rule.chat is not None or rt.rule.name in self.paused_rules:
+            if not rt.enabled or rt.rule.name in self.paused_rules:
+                continue
+            if rt.rule.chat is not None:
+                self._next_request(rt, now, states)
                 continue
             if rt.last_fired is not None and now - rt.last_fired < rt.rule.cooldown:
                 continue
@@ -332,16 +359,55 @@ class AutomationEngine:
             if key in self._chat_seen:
                 continue
             self._chat_seen[key] = now
+            steps, why = substitute(rt.steps, values), f"{ev.channel} from {ev.sender}: {ev.text!r}"
+            busy = ("still running" if rt.running_step is not None else
+                    "on cooldown" if rt.last_fired is not None and now - rt.last_fired < rt.rule.cooldown else
+                    "others are queued first" if rt.pending else None)
+            if busy:
+                self._queue(rt, _Request(ev.sender, steps, why, now), busy)
+                continue
             if rt.rule.when is not None and not self._matches(rt, self.source.states()):
                 continue
-            if rt.running_step is not None:
-                self._event(f"rule {rt.rule.name!r}: still running, chat from {ev.sender} skipped")
+            self._fire(rt, now, steps, why, ev.sender)
+
+    # ------------------------------------------------------------------ chat request queue
+    def queue_limit(self, rt: RuleRuntime) -> int:
+        return self.options.chat_queue if rt.rule.queue is None else rt.rule.queue
+
+    def _queue(self, rt: RuleRuntime, req: _Request, busy: str) -> None:
+        name, who = rt.rule.name, req.sender.lower()
+        if who == (rt.current_sender or "").lower() and rt.running_step is not None or \
+                any(q.sender.lower() == who for q in rt.pending):
+            self._event(f"rule {name!r}: {req.sender} is already being served or queued, skipped")
+            return
+        if busy == "on cooldown" and who == (rt.last_sender or "").lower():
+            self._event(f"rule {name!r}: on cooldown, chat from {req.sender} skipped (they were just served)")
+            return
+        limit = self.queue_limit(rt)
+        if limit == 0:
+            self._event(f"rule {name!r}: {busy}, chat from {req.sender} skipped (queueing is off)")
+            return
+        if len(rt.pending) >= limit:
+            self._event(f"rule {name!r}: queue full ({limit}), chat from {req.sender} skipped")
+            return
+        rt.pending.append(req)
+        self._event(f"rule {name!r}: {busy}, {req.sender} queued (#{len(rt.pending)})")
+
+    def _next_request(self, rt: RuleRuntime, now: float, states: dict[int, ClientState | None]) -> None:
+        """Serve the next queued chat request once the rule is free and off cooldown."""
+        if rt.last_fired is not None and now - rt.last_fired < rt.rule.cooldown:
+            return
+        while rt.pending:
+            req = rt.pending.popleft()
+            if now - req.queued_at > self.options.chat_queue_ttl:
+                self._event(f"rule {rt.rule.name!r}: {req.sender}'s request expired after "
+                            f"{fmt_left(self.options.chat_queue_ttl)} in the queue")
                 continue
-            if rt.last_fired is not None and now - rt.last_fired < rt.rule.cooldown:
-                self._event(f"rule {rt.rule.name!r}: on cooldown, chat from {ev.sender} skipped")
+            if rt.rule.when is not None and not self._matches(rt, states):
+                self._event(f"rule {rt.rule.name!r}: {req.sender}'s request dropped, the condition is false now")
                 continue
-            self._fire(rt, now, substitute(rt.steps, values),
-                       f"{ev.channel} from {ev.sender}: {ev.text!r}")
+            self._fire(rt, now, req.steps, f"queued {fmt_left(now - req.queued_at)}, {req.why}", req.sender)
+            return
 
     def _sender_ok(self, allowed: list[str], sender: str) -> bool:
         names = {n.lower() for n in allowed}
@@ -372,10 +438,13 @@ class AutomationEngine:
                 or not any(o is not None and len(o) > len(w) and w in o for o in words.values())]
 
     # ------------------------------------------------------------------ running
-    def _fire(self, rt: RuleRuntime, now: float, steps: list[Step] | None = None, why: str = "") -> None:
+    def _fire(self, rt: RuleRuntime, now: float, steps: list[Step] | None = None, why: str = "",
+              sender: str | None = None) -> None:
         rt.last_fired = now
         rt.fire_count += 1
         rt.run_steps = steps
+        rt.current_sender = sender
+        rt.last_sender = sender
         self._event(f"rule {rt.rule.name!r} fired{f' ({why})' if why else ''}: {describe(steps or rt.steps)}")
         rt.running_step = 0
         rt.resume_at = now
@@ -387,8 +456,13 @@ class AutomationEngine:
             if rt.running_step >= len(steps):
                 rt.running_step = None
                 rt.run_steps = None
+                rt.current_sender = None
+                self._release(rt)
                 return
             step = steps[rt.running_step]
+            if isinstance(step, (TypeStep, SendStep)) and (later := self._gap_until(rt, step, now)) > now:
+                rt.resume_at = later  # another rule just acted on that character: let its cast finish first
+                return
             rt.running_step += 1
             if isinstance(step, WaitStep):
                 rt.resume_at = now + step.seconds
@@ -409,6 +483,31 @@ class AutomationEngine:
                 else:
                     slots = self.sender.send_chord(step.chord, step.to)
                     self._event(f"  sent {step.chord} -> slots {slots}")
+
+    def _gap_until(self, rt: RuleRuntime, step: TypeStep | SendStep, now: float) -> float:
+        """When this step may go: rule_gap after another rule's last step on any of its characters.
+        Records the step as the last one there when it may go now."""
+        gap = self.options.rule_gap
+        me = rt.rule.name
+        slots = self.source.slots_for(step.to) if gap > 0 else []
+        if any(s in self._claims and self._claims[s] != me for s in slots):
+            return now + CLAIM_RECHECK  # another rule is already waiting for that character: it goes first
+        others = [self._slot_last[s][0] for s in slots if s in self._slot_last and self._slot_last[s][1] != me]
+        later = max(others, default=now - gap) + gap
+        if later > now:
+            for s in slots:
+                self._claims.setdefault(s, me)  # first in line: other rules wait behind this step
+            return later
+        for s in slots:
+            self._slot_last[s] = (now, me)
+            if self._claims.get(s) == me:
+                del self._claims[s]
+        return now
+
+    def _release(self, rt: RuleRuntime) -> None:
+        """A rule stopped: let go of characters it was waiting for."""
+        for s in [s for s, name in self._claims.items() if name == rt.rule.name]:
+            del self._claims[s]
 
     def _event(self, msg: str) -> None:
         log.info(msg)

@@ -800,7 +800,21 @@ automation:
 - **`when:`** adds a condition on that character's current state, e.g. not casting, not dead, out of combat. Any bridge field from the list above can go here.
 - **`do:`** is the same step list as a macro. `{sender}` is filled in with the whisperer's name.
 - **`[@{sender}]`** casts on the whisperer without changing your target. It works for party and raid members. For anyone else, use `/target {sender}` + `/cast …` + `/targetlasttarget`, as in `buff-bot`.
-- **`cooldown:`** stops one person from spamming the rule. A rule that's still running its steps also won't start again.
+- **`cooldown:`** stops one person from spamming the rule: the person just served can't trigger it again until the cooldown ends.
+- **Requests queue while the rule is busy.** If three people ask for buffs at once, the rule serves them one after another:
+
+  | Time | |
+  |---|---|
+  | 0 s | Tinkerdawn asks: the rule runs for Tinkerdawn. |
+  | 2 s | Gnope asks: queued (#1). |
+  | 3 s | Randompug asks: queued (#2). |
+  | after Tinkerdawn's run and the cooldown | Gnope is served, then Randompug. |
+
+  - **One place per person:** asking again while you're queued or being served doesn't add a second place.
+  - **Limits:** up to `chat_queue` requests (5) wait, each for at most `chat_queue_ttl` (60 s). Older ones are dropped and logged.
+  - **The condition is checked again** when a request's turn comes. If the rule has `when:` and it's false then, the request is dropped.
+  - **Per rule:** set *Queue while busy* in the editor (`queue:` in YAML) to a number, `off` (`0`, the old skip-it behaviour) or `default`.
+  - **The Status column** shows `running step 2/9 for Tinkerdawn · queued: Gnope, Randompug`, and *Next* says who's next.
 - **The most specific keyword wins.** Keywords match anywhere in the text, so `heal` is also inside "light heal" and "chain heals". When one rule's matched keyword is part of a longer keyword another rule matched, only the longer one fires:
 
   | Line | Rules with these keywords: `heal`, `heals`, `light heal`, `chain heal`, `chain heals` |
@@ -849,7 +863,8 @@ Long triggers and actions are cut off with "…". Hover over them to see all of 
 
 - `cooldown:` is the minimum time between firings.
 - `enabled: false` keeps a rule in the file but switched off.
-- A rule that's still running its sequence won't start again.
+- A rule that's still running its sequence won't start again (chat rules queue the request instead).
+- **Two rules on one character take turns.** Steps from *different* rules sent to the same character are kept at least `rule_gap` (1.5 s, the global cooldown) apart. A heal whispered in the middle of a buff round goes out 1.5 s after the last buff cast, and the rest of the buffs move back to make room, so neither fails with "Spell is not ready yet". The first rule to wait for a character goes first. Steps within one rule keep their own *Then wait* gaps. Set `rule_gap: 0` to turn this off.
 - **Safety:**
   - **Pausing is per rule.** With `pause_on_stale_bridge` (on by default), a client whose bridge can't be read (minimized, covered, addon off) pauses only the rules that check or send to it, because WoWBox can't tell whether you're typing there. Every other rule keeps running.
   - **A closed window** pauses nothing: targets like `all` simply leave it out.
@@ -1065,7 +1080,7 @@ Everything lives in `config\team.yaml`. The exe uses `config\team.yaml` next to 
 | `bridge` | `enabled`, `hz` (10), `block_size` (8, match `/bb size`), `method` (auto / mss / dxcam / printwindow), `stale_after` (1.5s), `commands` (true) |
 | `macros` | section 12. Kept in `config/macros.yaml` once you've saved from the macro editor. |
 | `automation` | section 13. Kept in `config/automation.yaml` once you've saved from the rule editor. |
-| `automation_options` | `enabled_on_start` (false), `dry_run` (true), `tick_hz` (10), `pause_on_stale_bridge` (true) |
+| `automation_options` | `enabled_on_start` (false), `dry_run` (true), `tick_hz` (10), `pause_on_stale_bridge` (true), `chat_queue` (5), `chat_queue_ttl` (60 s), `rule_gap` (1.5 s) |
 | `memread` | optional read-only memory reader: `enabled` (false), `hz`, `fields: {name: {address, module, offsets, type}}`. No addresses ship with WoWBox; you supply and verify them. |
 | `ui` | `overlay: true` shows the overlay on start |
 

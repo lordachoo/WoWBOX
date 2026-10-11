@@ -237,6 +237,7 @@ class AutomationRule(_Model):
     chat: ChatTrigger | None = None
     do: ActionConfig
     cooldown: Duration = 0.0
+    queue: int | None = Field(default=None, ge=0, le=50)  # chat rules: requests kept while busy (None: the default)
 
     @model_validator(mode="after")
     def _trigger(self) -> "AutomationRule":
@@ -254,6 +255,13 @@ class AutomationOptions(_Model):
     dry_run: bool = True
     tick_hz: float = 10.0
     pause_on_stale_bridge: bool = True
+    # Chat rules: a request that comes in while the rule is running or cooling down waits its turn
+    # (one per person, up to chat_queue of them, each for at most chat_queue_ttl). 0 turns queueing off.
+    chat_queue: int = Field(default=5, ge=0, le=50)
+    chat_queue_ttl: Duration = 60.0
+    # Steps from two *different* rules on the same character are kept at least this far apart (the global
+    # cooldown), so a heal goes between two buff casts instead of failing. 0 turns it off.
+    rule_gap: Duration = 1.5
 
 
 class MemReadField(_Model):

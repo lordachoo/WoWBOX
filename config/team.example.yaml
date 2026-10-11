@@ -154,6 +154,9 @@ automation_options:
   dry_run: true                 # log what would be sent without sending
   tick_hz: 10
   pause_on_stale_bridge: true   # a rule waits while a client it checks or sends to can't be read
+  chat_queue: 5                 # chat requests kept per rule while it's busy (one per person); 0 = skip them
+  chat_queue_ttl: 60s           # a queued request older than this is dropped
+  rule_gap: 1.5s                # different rules' steps on one character stay this far apart (global cooldown)
 
 memread:                        # optional, read-only ReadProcessMemory. Off by default.
   enabled: false

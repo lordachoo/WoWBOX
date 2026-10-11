@@ -51,6 +51,8 @@ def rule_dict(rule: AutomationRule) -> dict:
     d["do"] = steps[0] if len(steps) == 1 else {"sequence": steps}
     if rule.cooldown:
         d["cooldown"] = fmt_duration(rule.cooldown)
+    if rule.queue is not None:
+        d["queue"] = rule.queue
     return d
 
 
