@@ -66,7 +66,7 @@ def test_rules_and_macros_report_into_the_feed():
     e.on_activity = lambda name, text, slots: feed.add("rule", name, text, slots)
     e.on_chat(3, ChatEvent(channel="whisper", sender="Gnope", text="heal pls"), now=0)
     got = [(a.name, a.kind, a.slots) for a in feed.items()]
-    assert got == [("heal", "fired", []), ("heal", "step", [3])]
+    assert got == [("heal", "fired", [3]), ("heal", "step", [3])]  # fired shows who the rule acts on
     assert feed.items()[1].text == "typed '/cast [@Gnope] Healing Wave' -> slots [3]"
     e.set_enabled(False)
     assert feed.items()[-1].name == "(automation)" and feed.items()[-1].text == "automation OFF"
@@ -76,7 +76,8 @@ def test_rules_and_macros_report_into_the_feed():
     m.on_activity = lambda name, text, slots: feed.add("macro", name, text, slots)
     m.start("pets").join(2)
     macro = [(a.name, a.kind, a.text) for a in feed.items() if a.source == "macro"]
-    assert macro == [("pets", "fired", "started"), ("pets", "step", "typed '/petattack' -> slots [3]"),
+    assert macro == [("pets", "fired", "started: type '/petattack' -> all; send 1 -> all"),
+                     ("pets", "step", "typed '/petattack' -> slots [3]"),
                      ("pets", "step", "sent 1 -> slots [3]"), ("pets", "done", "done")]
     assert m.progress == {}  # finished macros leave the live queue
 
@@ -100,11 +101,15 @@ def test_activity_tab_renders(qapp):
     c.team.clients[3].state = ClientState(name="Kunth", casting=True, health_pct=80.0)
     c.team.clients[1].state = ClientState(name="Tinkerdawn", dead=True)
     c.activity.add("rule", "heal", "typed '/cast Heal' -> slots [3]", [3])
+    c.activity.add("rule", "heal", "fired (whisper from Gnope: 'heal'): type x")
     tab = ActivityTab(c)
     tab.refresh(force=True)
     states = {tab.chars.item(r, 0).text(): tab.chars.item(r, 1).text() for r in range(tab.chars.rowCount())}
     assert states["1 Tinkerdawn"] == "DEAD" and states["3 Kunth"].startswith("casting")
-    assert tab.feed.rowCount() == 1 and tab.feed.item(0, 2).text() == "heal"
+    assert tab.feed.rowCount() == 1  # steps are hidden by default: one line per thing that ran
+    assert tab.feed.item(0, 3).text() == "heal" and tab.feed.item(0, 0).text() == "0s ago"
+    tab.show_steps.setChecked(True)
+    assert tab.feed.rowCount() == 2
     tab.show_rules.setChecked(False)
     assert tab.feed.rowCount() == 0
     shutil.rmtree(tmp)

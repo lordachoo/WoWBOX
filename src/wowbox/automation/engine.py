@@ -271,6 +271,8 @@ class AutomationEngine:
                 what = f"step {min(rt.running_step + 1, len(steps))}/{len(steps)}"
                 if nxt:
                     what += f": {describe([nxt])}"
+                if rt.last_fired is not None:
+                    what = f"running {fmt_left(now - rt.last_fired)} · {what}"
                 if rt.wait_reason:
                     first = any(self._claims.get(s, ("",))[0] == name for s in slots)
                     items.append(QueueItem(slots, name, "waiting", rt.current_sender or "",
@@ -505,7 +507,8 @@ class AutomationEngine:
         rt.run_steps = steps
         rt.current_sender = sender
         rt.last_sender = sender
-        self._event(f"rule {rt.rule.name!r} fired{f' ({why})' if why else ''}: {describe(steps or rt.steps)}")
+        self._event(f"rule {rt.rule.name!r} fired{f' ({why})' if why else ''}: {describe(steps or rt.steps)}",
+                    sorted(self._send_slots(rt)))
         rt.running_step = 0
         rt.resume_at = now
         self._advance(rt, now)

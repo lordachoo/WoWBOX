@@ -868,7 +868,7 @@ A live dashboard of everything rules and macros do. It updates four times a seco
   - **State:** `ok` with HP and power, `casting`, `channeling`, `typing`, `DEAD`, or `no bridge data`.
   - **Queue:** how many things are running, waiting or queued for that character.
   - **Last action:** the last line or key a rule or macro sent it, which rule or macro sent it, and how long ago.
-- **Live queue:** per character, in the order things will go:
+- **Now** (left, below the characters): per character, in the order things will go. Running and waiting rows say how long the rule has been running, e.g. *running 3s · step 2/9: …*
 
   | State | Means | Detail shows |
   |---|---|---|
@@ -878,9 +878,11 @@ A live dashboard of everything rules and macros do. It updates four times a seco
   | **queued** (blue) | a chat request waiting for its rule to be free | its place, how long ago it was asked and when it expires, e.g. *#2 · asked 4s ago · expires in 56s* |
 
   The rule holding a character's turn is listed first among the waiting ones, and a rule's priority is shown next to its name. Typed lines waiting for you to stop typing in a window are listed too.
-- **Recent activity:** the last 300 events, newest first: rules firing (with the chat line that triggered them), each line or key sent and to whom, macros starting and finishing, requests queued, and anything skipped or expired.
+- **What ran** (right, beside *Now*): the last 300 events, newest first, with a live **Ago** column (*4s ago*, *2m 10s ago*) and the time.
+  - **What's in it:** rules firing (with the chat line that triggered them, the steps and the characters they act on), macros starting (with their steps) and finishing, requests queued, and anything skipped or expired.
+  - **Each step** (off by default) adds every single line or key sent and to whom.
   - **Colours:** fired is green, queued blue, skipped red, done grey.
-  - **Filters:** tick boxes show or hide **Rules**, **Macros**, **Each step** and **Queue and skips**. **Clear** empties the feed. **Timers start when automation is turned on:** a timer never fires the moment you switch automation on, even if it came due while automation was off.
+  - **Filters:** tick boxes show or hide **Rules**, **Macros**, **Each step** and **Queue and skips**. **Clear** empties the list. Hover over a cut-off line to read all of it. **Timers start when automation is turned on:** a timer never fires the moment you switch automation on, even if it came due while automation was off.
 
 ### Common to all rules
 

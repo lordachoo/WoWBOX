@@ -135,4 +135,7 @@ class MacroRunner:
             quote = rest[:1]
             end = rest.find(quote, 1)
             if quote in "'\"" and end > 0:
-                self.on_activity(rest[1:end], rest[end + 1:].strip(), [])
+                name, what = rest[1:end], rest[end + 1:].strip()
+                if what == "started" and name in self.macros:
+                    what = f"started: {describe(self.macros[name][1])}"
+                self.on_activity(name, what, [])

@@ -21,7 +21,7 @@ from ..automation.engine import QueueItem, fmt_left
 
 CHAR_COLS = ["Character", "State", "Queue", "Last action", "By", "When"]
 QUEUE_COLS = ["Character", "State", "Rule / macro", "For", "Detail"]
-FEED_COLS = ["Time", "Source", "Name", "What", "Characters"]
+FEED_COLS = ["Ago", "Time", "Source", "Name", "What", "Characters"]
 QUEUE_COLORS = {"running": "#2e7d32", "macro": "#6a1b9a", "waiting": "#ef6c00", "queued": "#1565c0"}
 FEED_COLORS = {"fired": "#2e7d32", "queued": "#1565c0", "skipped": "#c62828", "done": "#757575"}
 ROW_HEIGHT = 22
@@ -43,6 +43,7 @@ class ActivityTab(QWidget):
         self.c = controller
         self._queue_sig = None
         self._feed_sig = None
+        self._feed_rows: list = []  # the Activity shown in each feed row, for the live Ago column
 
         # characters
         self.chars = QTableWidget(0, len(CHAR_COLS))
@@ -76,10 +77,10 @@ class ActivityTab(QWidget):
         fh.setSectionResizeMode(FEED_COLS.index("What"), QHeaderView.Stretch)
         self.show_rules = QCheckBox("Rules", checked=True)
         self.show_macros = QCheckBox("Macros", checked=True)
-        self.show_steps = QCheckBox("Each step", checked=True)
+        self.show_steps = QCheckBox("Each step", checked=False)
         self.show_queue = QCheckBox("Queue and skips", checked=True)
         filters = QHBoxLayout()
-        filters.addWidget(QLabel("<b>Recent activity</b> (newest first) · show:"))
+        filters.addWidget(QLabel("<b>What ran</b> (newest first) · show:"))
         for cb in (self.show_rules, self.show_macros, self.show_steps, self.show_queue):
             cb.toggled.connect(lambda _: self.refresh(force=True))
             filters.addWidget(cb)
@@ -99,14 +100,14 @@ class ActivityTab(QWidget):
                 lay.addWidget(x)
             return w
 
-        # characters: always exactly as tall as its rows; the queue and the feed share the rest
-        split = QSplitter(Qt.Vertical)
-        split.addWidget(section("<b>Live queue</b> · per character, in the order things will go: running now "
-                                "(rules and macros), waiting (for a cast, the global cooldown or a rule with "
-                                "priority) and queued chat requests", self.queue))
+        # characters: always exactly as tall as its rows. Below it, side by side: now | what ran
+        split = QSplitter(Qt.Horizontal)
+        split.addWidget(section("<b>Now</b> · per character, in the order things will go: running (rules and "
+                                "macros), waiting (for a cast, the global cooldown or a rule with priority), "
+                                "queued chat requests", self.queue))
         split.addWidget(section(filters, self.feed))
-        split.setStretchFactor(0, 2)
-        split.setStretchFactor(1, 3)
+        split.setStretchFactor(0, 1)
+        split.setStretchFactor(1, 1)
         lay = QVBoxLayout(self)
         lay.addWidget(QLabel("<b>Characters</b> · state, and the last thing a rule or macro sent each one"))
         lay.addWidget(self.chars)
@@ -227,15 +228,22 @@ class ActivityTab(QWidget):
 
     def _refresh_feed(self, force: bool) -> None:
         feed = self.c.activity
-        if feed.version == self._feed_sig and not force:
-            return
-        self._feed_sig = feed.version
-        items = [a for a in reversed(feed.items()) if self._shown(a)]
         t = self.feed
-        t.setRowCount(len(items))
-        for r, a in enumerate(items):
-            color = FEED_COLORS.get(a.kind)
-            cells = [datetime.fromtimestamp(a.at).strftime("%H:%M:%S"), a.source, a.name, a.text,
-                     ", ".join(self._name(s) for s in a.slots)]
-            for col, text in enumerate(cells):
-                t.setItem(r, col, _item(text, color if col in (2, 3) else None))
+        now = time.monotonic()
+        if feed.version != self._feed_sig or force:
+            self._feed_sig = feed.version
+            items = [a for a in reversed(feed.items()) if self._shown(a)]
+            self._feed_rows = items
+            t.setRowCount(len(items))
+            name_col, what_col = FEED_COLS.index("Name"), FEED_COLS.index("What")
+            for r, a in enumerate(items):
+                color = FEED_COLORS.get(a.kind)
+                cells = ["", datetime.fromtimestamp(a.at).strftime("%H:%M:%S"), a.source, a.name, a.text,
+                         ", ".join(self._name(s) for s in a.slots)]
+                for col, text in enumerate(cells):
+                    t.setItem(r, col, _item(text, color if col in (name_col, what_col) else None))
+        for r, a in enumerate(self._feed_rows):  # the Ago column counts up live
+            text = f"{fmt_left(now - a.mono)} ago"
+            it = t.item(r, 0)
+            if it is not None and it.text() != text:
+                it.setText(text)
