@@ -78,7 +78,7 @@ It works from outside the game. WoWBox never injects code into WoW or modifies i
 ## 3. Quick start
 
 ```powershell
-cd C:\Users\exx\Downloads\WOWBOX
+cd WOWBOX                                              # wherever you cloned or unpacked it
 powershell -ExecutionPolicy Bypass -File setup.ps1     # once: Python 3.12 venv + dependencies + config\team.yaml
 ```
 

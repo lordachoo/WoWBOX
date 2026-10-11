@@ -14,3 +14,7 @@ config/*.bak
 *.egg-info/
 config/macros.yaml
 config/automation.yaml
+*.bak
+*.log
+.coverage
+htmlcov/
