@@ -238,6 +238,7 @@ class AutomationRule(_Model):
     do: ActionConfig
     cooldown: Duration = 0.0
     queue: int | None = Field(default=None, ge=0, le=50)  # chat rules: requests kept while busy (None: the default)
+    priority: int = Field(default=0, ge=-100, le=100)  # waiting for the same character: higher goes first
 
     @model_validator(mode="after")
     def _trigger(self) -> "AutomationRule":
@@ -262,6 +263,13 @@ class AutomationOptions(_Model):
     # Steps from two *different* rules on the same character are kept at least this far apart (the global
     # cooldown), so a heal goes between two buff casts instead of failing. 0 turns it off.
     rule_gap: Duration = 1.5
+    # ...and while the character is casting or channeling something (a 2.5 s Chain Heal, Drain Soul), for at
+    # most cast_wait_max. A rule's own steps never wait for its own casts: its Then wait gaps do that.
+    wait_for_casts: bool = True
+    cast_wait_max: Duration = 10.0
+    # Dead characters (or ghosts) don't match conditions like health < 30 and get no steps sent to them,
+    # unless the condition itself asks about `dead`/`ghost`.
+    skip_dead: bool = True
 
 
 class MemReadField(_Model):

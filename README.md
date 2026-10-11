@@ -864,7 +864,16 @@ Long triggers and actions are cut off with "…". Hover over them to see all of 
 - `cooldown:` is the minimum time between firings.
 - `enabled: false` keeps a rule in the file but switched off.
 - A rule that's still running its sequence won't start again (chat rules queue the request instead).
-- **Two rules on one character take turns.** Steps from *different* rules sent to the same character are kept at least `rule_gap` (1.5 s, the global cooldown) apart. A heal whispered in the middle of a buff round goes out 1.5 s after the last buff cast, and the rest of the buffs move back to make room, so neither fails with "Spell is not ready yet". The first rule to wait for a character goes first. Steps within one rule keep their own *Then wait* gaps. Set `rule_gap: 0` to turn this off.
+- **Two rules on one character take turns.** When a step from one rule wants a character that another rule just used, it waits for both of these:
+  - **The global cooldown:** `rule_gap` (1.5 s) after the other rule's last step there.
+  - **The current cast:** the cast or channel in progress (a 2.5 s Chain Heal, Drain Soul) has finished, as read from the bridge. A stuck flag holds it for at most `cast_wait_max` (10 s).
+
+  A totem or heal request in the middle of a chain-heal loop goes out as soon as the current Chain Heal lands. The loop then continues after it. A rule's own steps never wait for its own casts: its *Then wait* gaps handle that. Set `rule_gap: 0` and `wait_for_casts: false` to turn this off.
+- **Priority** (`priority:`, the editor's *Priority* box, default 0) decides who goes first when several rules wait for the same character: higher first, equal = first come, first served. Give totems `priority: 10` and they jump ahead of a waiting heal. It doesn't interrupt a cast already in progress.
+- **Dead characters are left alone** (`skip_dead`, on by default):
+  - A dead character or ghost never matches a condition, so `health_pct < 70` doesn't fire forever for a dead team.
+  - Steps aren't sent to dead characters; a step whose characters are all dead is skipped.
+  - A condition that asks about death itself (`dead = yes`, e.g. a resurrect rule) still sees them.
 - **Safety:**
   - **Pausing is per rule.** With `pause_on_stale_bridge` (on by default), a client whose bridge can't be read (minimized, covered, addon off) pauses only the rules that check or send to it, because WoWBox can't tell whether you're typing there. Every other rule keeps running.
   - **A closed window** pauses nothing: targets like `all` simply leave it out.
@@ -1080,7 +1089,7 @@ Everything lives in `config\team.yaml`. The exe uses `config\team.yaml` next to 
 | `bridge` | `enabled`, `hz` (10), `block_size` (8, match `/bb size`), `method` (auto / mss / dxcam / printwindow), `stale_after` (1.5s), `commands` (true) |
 | `macros` | section 12. Kept in `config/macros.yaml` once you've saved from the macro editor. |
 | `automation` | section 13. Kept in `config/automation.yaml` once you've saved from the rule editor. |
-| `automation_options` | `enabled_on_start` (false), `dry_run` (true), `tick_hz` (10), `pause_on_stale_bridge` (true), `chat_queue` (5), `chat_queue_ttl` (60 s), `rule_gap` (1.5 s) |
+| `automation_options` | `enabled_on_start` (false), `dry_run` (true), `tick_hz` (10), `pause_on_stale_bridge` (true), `chat_queue` (5), `chat_queue_ttl` (60 s), `rule_gap` (1.5 s), `wait_for_casts` (true), `cast_wait_max` (10 s), `skip_dead` (true) |
 | `memread` | optional read-only memory reader: `enabled` (false), `hz`, `fields: {name: {address, module, offsets, type}}`. No addresses ship with WoWBox; you supply and verify them. |
 | `ui` | `overlay: true` shows the overlay on start |
 

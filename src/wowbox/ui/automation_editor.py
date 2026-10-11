@@ -8,7 +8,7 @@ from pydantic import ValidationError
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QFormLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
-    QPushButton, QTableWidget, QVBoxLayout, QWidget,
+    QPushButton, QSpinBox, QTableWidget, QVBoxLayout, QWidget,
 )
 
 from ..config import CHAT_CHANNELS, AutomationRule
@@ -113,13 +113,15 @@ def split_list(text: str) -> list[str] | None:
 def build_rule(name: str, enabled: bool, cooldown: str, trigger: str, *, who: str = "any",
                conditions: list[dict] | None = None, every: str = "", channels: list[str] | None = None,
                senders: str = "", contains: str = "", heard_by: str = "all", queue: str = "",
-               steps: list[dict]) -> AutomationRule:
+               priority: int = 0, steps: list[dict]) -> AutomationRule:
     """Editor values -> AutomationRule. Raises ValueError with a readable message."""
     if not name.strip():
         raise ValueError("Give the rule a name.")
     data: dict = {"name": name.strip(), "enabled": enabled}
     if cooldown.strip():
         data["cooldown"] = cooldown.strip()
+    if priority:
+        data["priority"] = priority
     if trigger in ("state", "chat+state"):
         when: dict = {"slot": parse_who(who)}
         for i, c in enumerate(conditions or [], 1):
@@ -271,6 +273,12 @@ class RuleEditor(QDialog):
         top.addRow("", self.enabled)
         top.addRow("Trigger", self.trigger)
         top.addRow("Cooldown", self.cooldown)
+        self.priority = QSpinBox()
+        self.priority.setRange(-100, 100)
+        self.priority.setValue(rule.priority if rule else 0)
+        self.priority.setToolTip("When rules wait for the same character (its cast or global cooldown), "
+                                 "the higher priority goes first. Equal: first come, first served.")
+        top.addRow("Priority", self.priority)
 
         # state
         self.who = QComboBox()
@@ -395,7 +403,7 @@ class RuleEditor(QDialog):
             who=self.who.currentText(), conditions=self.conditions.read(), every=self.every.text(),
             channels=[ch for ch, cb in self.channel_boxes.items() if cb.isChecked()],
             senders=self.senders.text(), contains=self.contains.text(), heard_by=self.heard_by.currentText(),
-            queue=self.queue.currentText(), steps=self.steps.read())
+            queue=self.queue.currentText(), priority=self.priority.value(), steps=self.steps.read())
         if rule.name in self.other_names:
             raise ValueError(f"There's already a rule called {rule.name!r}.")
         return rule
@@ -407,7 +415,7 @@ class RuleEditor(QDialog):
                 who=self.who.currentText(), conditions=self.conditions.read(), every=self.every.text(),
                 channels=[ch for ch, cb in self.channel_boxes.items() if cb.isChecked()],
                 senders=self.senders.text(), contains=self.contains.text(),
-                heard_by=self.heard_by.currentText(), queue=self.queue.currentText(), steps=self.steps.read())
+                heard_by=self.heard_by.currentText(), queue=self.queue.currentText(), priority=self.priority.value(), steps=self.steps.read())
         except ValueError as e:
             self.check.setText(f"<span style='color:gray'>Not complete yet: {e}</span>")
             return

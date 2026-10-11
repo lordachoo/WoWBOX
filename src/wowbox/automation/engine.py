@@ -59,8 +59,8 @@ OP_WORDS = {operator.eq: "=", operator.ne: "≠", operator.lt: "<", operator.le:
             operator.ge: "≥"}
 
 
-def condition_report(cond: Condition, states: dict[int, ClientState | None], preds: list | None = None
-                     ) -> tuple[bool, list[tuple[int, bool, str]]]:
+def condition_report(cond: Condition, states: dict[int, ClientState | None], preds: list | None = None,
+                     skip_dead: bool = True) -> tuple[bool, list[tuple[int, bool, str]]]:
     """Whether `cond` matches now, and per character: (slot, matches, why not). `slot: all` needs every
     listed character to match, anything else any one of them."""
     preds = compile_condition(cond) if preds is None else preds
@@ -71,10 +71,14 @@ def condition_report(cond: Condition, states: dict[int, ClientState | None], pre
     else:
         slots = sorted(states)
     per: list[tuple[int, bool, str]] = []
+    asks_about_death = any(fld in ("dead", "ghost") for fld, _, _ in preds)
     for slot in slots:
         st = states.get(slot)
         if st is None or st.stale:
             per.append((slot, False, "no bridge data"))
+            continue
+        if skip_dead and not asks_about_death and (st.dead or st.ghost):
+            per.append((slot, False, "dead"))
             continue
         failed = next(((fld, fn, val) for fld, fn, val in preds if not fn(getattr(st, fld), val)), None)
         if failed is None:
@@ -143,6 +147,8 @@ class RuleRuntime:
     pending: deque = field(default_factory=deque)  # chat requests waiting their turn: _Request
     current_sender: str | None = None  # whose request the current run is for (chat rules)
     last_sender: str | None = None  # whose request the last run was for: cooldown still stops their repeats
+    wait_reason: str = ""  # why the current step is waiting, for the Status column
+    cast_wait_since: float | None = None  # when the current step started waiting for someone's cast
 
     @property
     def enabled(self) -> bool:
@@ -167,7 +173,7 @@ class AutomationEngine:
         self.rules: list[RuleRuntime] = []
         self.paused_rules: set[str] = set()  # e.g. while a rule is open in the editor
         self._slot_last: dict[int, tuple[float, str]] = {}  # slot -> (time, rule) of the last step sent there
-        self._claims: dict[int, str] = {}  # slot -> the rule first in line for it (waiting out rule_gap)
+        self._claims: dict[int, tuple[str, int]] = {}  # slot -> (rule, priority) first in line for it
         self.load(rules)
 
     def load(self, rules: list[AutomationRule]) -> None:
@@ -195,8 +201,9 @@ class AutomationEngine:
         if rt.running_step is not None:
             steps = rt.run_steps if rt.run_steps is not None else rt.steps
             who = f" for {rt.current_sender}" if rt.current_sender else ""
+            waiting = f" · waiting: {rt.wait_reason}" if rt.wait_reason else ""
             nxt = f"next: {rt.pending[0].sender}" if rt.pending else ""
-            return RuleStatus(f"running step {rt.running_step}/{len(steps)}{who}{queued}", nxt, None, last)
+            return RuleStatus(f"running step {rt.running_step}/{len(steps)}{who}{waiting}{queued}", nxt, None, last)
         cooling = r.cooldown - (now - rt.last_fired) if rt.last_fired is not None and r.cooldown else 0.0
         if not self.enabled:
             state = "automation OFF"
@@ -222,10 +229,10 @@ class AutomationEngine:
         elif r.chat is not None:
             nxt = "on a matching chat line"
             if r.when is not None:
-                ok, _ = condition_report(r.when, self.source.states(), rt.preds)
+                ok, _ = condition_report(r.when, self.source.states(), rt.preds, self.options.skip_dead)
                 nxt += " (condition true now)" if ok else " (but the condition is false now)"
         else:
-            ok, per = condition_report(r.when, self.source.states(), rt.preds)
+            ok, per = condition_report(r.when, self.source.states(), rt.preds, self.options.skip_dead)
             ready = ok
             if ok:
                 nxt = "now: condition is true" if cooling <= 0 else "after the cooldown: condition is true"
@@ -335,7 +342,7 @@ class AutomationEngine:
 
     def _matches(self, rt: RuleRuntime, states: dict[int, ClientState | None]) -> bool:
         assert rt.rule.when is not None
-        return condition_report(rt.rule.when, states, rt.preds)[0]
+        return condition_report(rt.rule.when, states, rt.preds, self.options.skip_dead)[0]
 
     # ------------------------------------------------------------------ chat
     def on_chat(self, slot: int, ev: ChatEvent, now: float, listener: str = "") -> None:
@@ -460,9 +467,22 @@ class AutomationEngine:
                 self._release(rt)
                 return
             step = steps[rt.running_step]
-            if isinstance(step, (TypeStep, SendStep)) and (later := self._gap_until(rt, step, now)) > now:
-                rt.resume_at = later  # another rule just acted on that character: let its cast finish first
-                return
+            to = step.to if isinstance(step, (TypeStep, SendStep)) else None
+            if to is not None:
+                slots = self.source.slots_for(step.to)
+                if self.options.skip_dead:
+                    alive = [s for s in slots if not self._dead(s)]
+                    if not alive and slots:
+                        rt.running_step += 1
+                        self._event(f"  skipped {describe([step])}: {self._names(slots)} dead")
+                        continue
+                    if len(alive) < len(slots):
+                        to = alive  # leave the dead out
+                        slots = alive
+                later = self._turn(rt, slots, now)
+                if later > now:
+                    rt.resume_at = later  # another rule's cast or global cooldown on that character first
+                    return
             rt.running_step += 1
             if isinstance(step, WaitStep):
                 rt.resume_at = now + step.seconds
@@ -474,40 +494,75 @@ class AutomationEngine:
                     self.on_macro(step.name)
             elif isinstance(step, TypeStep):
                 if self.dry_run:
-                    self._event(f"  [dry run] would type {step.text!r} -> {step.to}")
+                    self._event(f"  [dry run] would type {step.text!r} -> {to}")
                 else:
-                    self._event(f"  typed {step.text!r} -> slots {self.sender.type_text(step.text, step.to)}")
+                    self._event(f"  typed {step.text!r} -> slots {self.sender.type_text(step.text, to)}")
             elif isinstance(step, SendStep):
                 if self.dry_run:
-                    self._event(f"  [dry run] would send {step.chord} -> {step.to}")
+                    self._event(f"  [dry run] would send {step.chord} -> {to}")
                 else:
-                    slots = self.sender.send_chord(step.chord, step.to)
+                    slots = self.sender.send_chord(step.chord, to)
                     self._event(f"  sent {step.chord} -> slots {slots}")
 
-    def _gap_until(self, rt: RuleRuntime, step: TypeStep | SendStep, now: float) -> float:
-        """When this step may go: rule_gap after another rule's last step on any of its characters.
-        Records the step as the last one there when it may go now."""
-        gap = self.options.rule_gap
-        me = rt.rule.name
-        slots = self.source.slots_for(step.to) if gap > 0 else []
-        if any(s in self._claims and self._claims[s] != me for s in slots):
-            return now + CLAIM_RECHECK  # another rule is already waiting for that character: it goes first
-        others = [self._slot_last[s][0] for s in slots if s in self._slot_last and self._slot_last[s][1] != me]
-        later = max(others, default=now - gap) + gap
+    def _turn(self, rt: RuleRuntime, slots: list[int], now: float) -> float:
+        """When this rule's next step may go to `slots`. Rules take turns on a character:
+        - a rule already waiting for it goes first, unless this one has a higher priority;
+        - rule_gap after another rule's last step there (the global cooldown);
+        - and not while it's casting or channeling something this rule didn't start (up to cast_wait_max).
+        When it may go now, records it as the last step there and returns `now`."""
+        o = self.options
+        me, prio = rt.rule.name, rt.rule.priority
+        if o.rule_gap <= 0 and not o.wait_for_casts:
+            return now
+        later, why = now, ""
+        ahead = [c for s in slots if (c := self._claims.get(s)) and c[0] != me and c[1] >= prio]
+        others = [last for s in slots if (last := self._slot_last.get(s)) and last[1] != me]
+        latest = max(others, default=None)  # (time, rule) of another rule's last step on these characters
+        casting = [s for s in slots if self._casting(s) and self._slot_last.get(s, (0.0, ""))[1] != me]
+        if ahead:
+            later, why = now + CLAIM_RECHECK, f"{ahead[0][0]!r} goes first"
+        elif o.rule_gap > 0 and latest and latest[0] + o.rule_gap > now:
+            later, why = latest[0] + o.rule_gap, f"global cooldown after {latest[1]!r}"
+        elif o.wait_for_casts and casting:
+            if rt.cast_wait_since is None:
+                rt.cast_wait_since = now
+            if now - rt.cast_wait_since < o.cast_wait_max:  # after that, go anyway (a stuck flag)
+                later, why = now + CLAIM_RECHECK, f"{self._names(casting)} casting"
         if later > now:
             for s in slots:
-                self._claims.setdefault(s, me)  # first in line: other rules wait behind this step
+                c = self._claims.get(s)
+                if c is None or (c[0] != me and prio > c[1]):
+                    self._claims[s] = (me, prio)  # first in line (or ahead by priority)
+            rt.wait_reason = why
             return later
+        rt.wait_reason, rt.cast_wait_since = "", None
         for s in slots:
             self._slot_last[s] = (now, me)
-            if self._claims.get(s) == me:
+            if self._claims.get(s, ("",))[0] == me:
                 del self._claims[s]
         return now
 
     def _release(self, rt: RuleRuntime) -> None:
         """A rule stopped: let go of characters it was waiting for."""
-        for s in [s for s, name in self._claims.items() if name == rt.rule.name]:
+        rt.wait_reason, rt.cast_wait_since = "", None
+        for s in [s for s, c in self._claims.items() if c[0] == rt.rule.name]:
             del self._claims[s]
+
+    def _state(self, slot: int) -> ClientState | None:
+        st = self.source.states().get(slot)
+        return None if st is None or st.stale else st
+
+    def _dead(self, slot: int) -> bool:
+        st = self._state(slot)
+        return bool(st and (st.dead or st.ghost))
+
+    def _casting(self, slot: int) -> bool:
+        st = self._state(slot)
+        return bool(st and (st.casting or st.channeling))
+
+    def _names(self, slots: list[int]) -> str:
+        names = [st.name if (st := self._state(s)) and st.name else f"slot {s}" for s in slots]
+        return ", ".join(names)
 
     def _event(self, msg: str) -> None:
         log.info(msg)

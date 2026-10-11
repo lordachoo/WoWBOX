@@ -401,7 +401,7 @@ class Controller(QObject):
             lines.append(f"Fires on a {'/'.join(ch.channel)} line {src}{words}, heard by "
                          f"{', '.join(heard) if heard else '<b>nobody</b> (check Heard by)'}.")
         if rule.when is not None:
-            ok, per = condition_report(rule.when, self.states())
+            ok, per = condition_report(rule.when, self.states(), skip_dead=self.cfg.automation_options.skip_dead)
             who = " · ".join(f"{names.get(s, s)}: " + ("<span style='color:#2e7d32'>matches</span>" if m
                                                           else f"no ({why})") for s, m, why in per)
             head = "<b style='color:#2e7d32'>Condition is TRUE now</b>" if ok else "<b>Condition is false now</b>"

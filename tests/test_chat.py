@@ -354,3 +354,96 @@ def test_rule_gap_off_lets_rules_overlap():
     e.on_chat(3, whisper(sender="Gnope", text="buff"), now=0)
     e.on_chat(3, whisper(sender="Tinkerdawn", text="heal"), now=0.2)
     assert typed(sender) == ["/cast [@Gnope] Kings", "/cast Healing Wave"]
+
+
+# ---------------------------------------------------------------- dead characters, casts, priority
+LOW_HP = {"name": "chain-when-hurt", "when": {"slot": "any", "health_pct_lt": 70},
+          "do": {"type": "/cast Chain Heal", "to": "Kunth"}, "cooldown": "3s"}
+
+
+def test_dead_characters_dont_match_and_get_nothing():
+    e, sender = engine([LOW_HP])
+    src = e.source
+    for s in (1, 2, 3):
+        src.st[s] = ClientState(name=src.st[s].name, health_pct=0.0, dead=True)
+    for t in range(0, 30):
+        e.tick(t)
+    assert sender.sent == []  # the whole team is dead: no endless Chain Heal
+    assert "dead" in e.status(e.rules[0], 30).next
+    src.st[1] = ClientState(name="Tinkerdawn", health_pct=40.0)  # Tinkerdawn alive and hurt, Kunth still dead
+    e.tick(40)
+    assert sender.sent == []  # the step goes to Kunth, who's dead: skipped
+    src.st[3] = ClientState(name="Kunth", health_pct=100.0)
+    e.tick(50)
+    assert typed(sender) == ["/cast Chain Heal"]
+
+
+def test_a_condition_about_death_still_sees_the_dead():
+    rule = {"name": "res", "when": {"slot": 1, "dead": True}, "do": {"type": "/cast Ancestral Spirit", "to": "Kunth"}}
+    e, sender = engine([rule])
+    e.source.st[1] = ClientState(name="Tinkerdawn", dead=True)
+    e.tick(0)
+    assert typed(sender) == ["/cast Ancestral Spirit"]
+
+
+def test_steps_leave_out_dead_characters():
+    rule = {"name": "buff-all", "every": "10s", "do": {"type": "/cast Kings", "to": "all"}}
+    e, sender = engine([rule])
+    e.source.st[2] = ClientState(name="Gnope", dead=True)
+    e.tick(0)
+    e.tick(10)
+    assert sender.sent == [("type", "/cast Kings", [1, 3])]
+
+
+def test_other_rules_wait_for_a_cast_in_progress():
+    totems = {"name": "totems", "chat": {"contains": ["totem"], "heard_by": "Kunth"},
+              "do": {"type": "/cast Call of the Elements", "to": "Kunth"}}
+    e, sender = engine([totems], rule_gap=0)
+    e.source.st[3] = ClientState(name="Kunth", casting=True)  # mid Chain Heal (you, or another rule)
+    e.on_chat(3, whisper(text="totems pls"), now=0)
+    assert typed(sender) == [] and "Kunth casting" in e.status(e.rules[0], 0).state
+    e.tick(1)
+    assert typed(sender) == []
+    e.source.st[3] = ClientState(name="Kunth")  # cast finished
+    e.tick(2.5)
+    assert typed(sender) == ["/cast Call of the Elements"]
+
+
+def test_a_stuck_casting_flag_only_holds_a_step_for_cast_wait_max():
+    totems = {"name": "totems", "chat": {"contains": ["totem"], "heard_by": "Kunth"},
+              "do": {"type": "/cast Call of the Elements", "to": "Kunth"}}
+    e, sender = engine([totems], rule_gap=0, cast_wait_max=4)
+    e.source.st[3] = ClientState(name="Kunth", channeling=True)
+    e.on_chat(3, whisper(text="totem"), now=0)
+    e.tick(3.9)
+    assert typed(sender) == []
+    e.tick(4.1)
+    assert typed(sender) == ["/cast Call of the Elements"]
+
+
+def test_a_rule_doesnt_wait_for_its_own_cast():
+    rule = {"name": "chain-x2", "chat": {"contains": ["chains"], "heard_by": "Kunth"},
+            "do": {"sequence": [{"type": "/cast Chain Heal", "to": "Kunth"}, {"wait": "2.6s"},
+                                {"type": "/cast Chain Heal", "to": "Kunth"}]}}
+    e, sender = engine([rule])
+    e.on_chat(3, whisper(text="chains"), now=0)
+    e.source.st[3] = ClientState(name="Kunth", casting=True)  # its own first cast
+    e.tick(2.6)
+    assert typed(sender) == ["/cast Chain Heal", "/cast Chain Heal"]
+
+
+def test_priority_goes_first_when_rules_wait_for_the_same_character():
+    def rule(name, word, prio=0):
+        return {"name": name, "chat": {"contains": [word], "heard_by": "Kunth"},
+                "do": {"type": f"/cast {name}", "to": "Kunth"}, "priority": prio}
+    for prio, first in ((0, "heal"), (10, "totems")):  # equal: first come; higher priority: jumps ahead
+        e, sender = engine([rule("chain", "chain"), rule("heal", "heal"), rule("totems", "totem", prio)])
+        e.on_chat(3, whisper(text="chain"), now=0)  # Kunth casts; everything else waits 1.5 s
+        e.on_chat(3, whisper(sender="Gnope", text="heal"), now=0.2)
+        e.on_chat(3, whisper(sender="Gnope", text="totem"), now=0.4)
+        t = 0.4
+        while t < 6:
+            t = round(t + 0.05, 2)
+            e.tick(t)
+        assert typed(sender)[1] == f"/cast {first}", prio
+        assert len(typed(sender)) == 3

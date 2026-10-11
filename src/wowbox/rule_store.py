@@ -53,6 +53,8 @@ def rule_dict(rule: AutomationRule) -> dict:
         d["cooldown"] = fmt_duration(rule.cooldown)
     if rule.queue is not None:
         d["queue"] = rule.queue
+    if rule.priority:
+        d["priority"] = rule.priority
     return d
 
 

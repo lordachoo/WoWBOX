@@ -21,7 +21,7 @@ RULES = [
     {"name": "heal-on-whisper",
      "chat": {"channel": "whisper", "sender": ["Tinkerdawn", "Gnope"], "contains": ["heal"], "heard_by": "Kunth"},
      "do": {"sequence": [{"type": "/cast [@{sender}] Healing Wave", "to": "Kunth"}]}, "cooldown": "3s",
-     "queue": 0},
+     "queue": 0, "priority": 5},
     {"name": "chain-if-free",
      "chat": {"channel": ["whisper", "party"], "contains": ["chain"], "heard_by": "Kunth"},
      "when": {"slot": "any", "casting": False, "health_pct_gte": 50.5},
@@ -50,7 +50,7 @@ def rules():
 
 def key(r: AutomationRule):
     return (r.name, r.enabled, r.when and r.when.model_dump(), r.every, r.chat and r.chat.model_dump(), r.cooldown,
-            r.queue,
+            r.queue, r.priority,
             [s.model_dump() for s in flat_steps(r.do)])
 
 
