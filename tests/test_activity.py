@@ -119,3 +119,33 @@ def test_activity_tab_renders(qapp):
 def qapp():
     from PySide6.QtWidgets import QApplication
     return QApplication.instance() or QApplication([])
+
+
+def test_controller_is_a_working_state_source_for_the_engine(qapp):
+    """The engine calls back into the Controller (states, slots_for, too_far_apart...): a name clash there once
+    crashed the window's refresh in a loop."""
+    from pathlib import Path
+    import shutil
+    import tempfile
+    from wowbox.app import Controller
+    from wowbox.automation.engine import RuleRuntime, compile_condition
+    from wowbox.automation.actions import flatten
+    from wowbox.config import AutomationRule, load_config
+    from wowbox.platform.fake import FakeCapture, FakeInput, FakeWindows
+    tmp = Path(tempfile.mkdtemp())
+    shutil.copy(Path(__file__).parent.parent / "config" / "team.example.yaml", tmp / "team.yaml")
+    windows = FakeWindows()
+    c = Controller(tmp / "team.yaml", load_config(tmp / "team.yaml"), windows, FakeInput(), lambda: FakeCapture())
+    for slot in (1, 2, 3):
+        windows.add(0x100 * slot, pid=slot)
+        cl = c.team.clients[slot]
+        cl.hwnd, cl.pid, cl.alive = 0x100 * slot, slot, True
+        cl.state = ClientState(name=f"C{slot}", health_pct=100.0 if slot != 2 else 20.0, map_id=10 if slot != 2 else 11)
+    rule = AutomationRule.model_validate({"name": "heal", "when": {"slot": "any", "health_pct_lt": 50},
+                                          "do": {"type": "/cast [@{name}] Heal", "to": [3]}})
+    rt = RuleRuntime(rule, flatten(rule.do), compile_condition(rule.when))
+    ok, per, values = c.engine._check(rt, c.states())
+    assert not ok and dict((s, w) for s, _, w in per)[2].startswith("too far")  # slot 2 is in another zone
+    c.engine.load([rule])
+    c.engine.status(c.engine.rules[0], time.monotonic())  # what the window calls 4 times a second
+    shutil.rmtree(tmp)

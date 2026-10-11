@@ -418,7 +418,7 @@ class AutomationEngine:
 
     def _far(self, rt: RuleRuntime, states: dict[int, ClientState | None]) -> dict[int, str]:
         """Characters too far from every character the rule acts on: slot -> why (e.g. "in another zone")."""
-        apart = getattr(self.source, "apart", None)
+        apart = getattr(self.source, "too_far_apart", None)
         if not self.options.skip_far or apart is None:
             return {}
         targets = sorted(self._send_slots(rt))

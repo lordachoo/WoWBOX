@@ -467,7 +467,7 @@ def test_queue_view_shows_running_waiting_and_queued():
 # ---------------------------------------------------------------- far away characters, {name}
 class FarSource(Source):
     """Tinkerdawn (1) and Kunth (3) together; Gnope (2) in another zone."""
-    def apart(self, slot, other):
+    def too_far_apart(self, slot, other):
         return "in another zone" if 2 in (slot, other) and slot != other else None
 
 

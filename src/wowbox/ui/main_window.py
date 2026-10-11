@@ -65,7 +65,7 @@ class MainWindow(QMainWindow):
         self.statusBar().addPermanentWidget(self.status, 1)
 
         self.c.sig_log.connect(self.log_view.appendPlainText)
-        self.timer = QTimer(self, timeout=self.refresh, interval=250)
+        self.timer = QTimer(self, timeout=self._safe_refresh, interval=250)
         self.timer.start()
         self.load_routes()
         self.load_automation()
@@ -639,6 +639,17 @@ class MainWindow(QMainWindow):
         self.banner.setVisible(bool(lines))
 
     # ------------------------------------------------------------------ periodic
+    def _safe_refresh(self) -> None:
+        """The 4-times-a-second refresh. A bug in it is logged once, not every 250 ms."""
+        try:
+            self.refresh()
+            self._refresh_error = None
+        except Exception as e:
+            key = f"{type(e).__name__}: {e}"
+            if key != getattr(self, "_refresh_error", None):
+                self._refresh_error = key
+                log.exception("window refresh failed (shown once until it changes)")
+
     def refresh(self) -> None:
         on = self.c.router.enabled
         self.b_broadcast.setText(f"Broadcast: {'ON' if on else 'OFF'}  [{self.c.cfg.hotkeys.toggle_broadcast}]")

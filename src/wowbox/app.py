@@ -619,7 +619,7 @@ class Controller(QObject):
     def missing_windows(self) -> list[int]:
         return sorted(self._lost)
 
-    def apart(self, slot: int, other: int) -> str | None:
+    def too_far_apart(self, slot: int, other: int) -> str | None:
         """Why `slot` isn't near `other` (another zone, too far), or None (near, or can't tell)."""
         return self.where_apart(slot, other)
 
