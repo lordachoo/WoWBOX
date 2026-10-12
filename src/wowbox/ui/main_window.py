@@ -628,6 +628,11 @@ class MainWindow(QMainWindow):
         if held := c.router.waiting():
             lines.append("Waiting for you to stop typing or pressing keys: " + ", ".join(
                 f"{name(s)} ({n} queued)" for s, n in sorted(held.items())) + ". It goes out when you stop.")
+        if stale := c.chat_filter_stale():
+            lines.append(f"<b>Chat filter out of date</b> on {', '.join(name(s) for s in stale)}: your chat rules "
+                         "changed, and BoxBridge only loads the new word list on <b>/reload</b> (type "
+                         "<code>/bb all reload</code>). Until then those clients pass on the old list's lines. "
+                         "If a /reload doesn't clear this, copy the new addon/BoxBridge folder into the game.")
         if gone := c.missing_windows():
             lines.append(f"Window closed: {', '.join(name(s) for s in gone)}. Left out of broadcasting and rules; "
                          "Attach or Launch brings it back.")

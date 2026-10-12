@@ -55,6 +55,13 @@ GROUPS: list[tuple[str, list[Setting]]] = [
         Setting("automation_options", "tick_hz", "Checks per second",
                 "How often rules are checked (10 is plenty)."),
     ]),
+    ("Chat filter (BoxBridge)", [
+        Setting("bridge", "chat_filter", "Pass on only lines a chat rule could use",
+                "WoWBox writes your chat rules' words into BoxBridge's Words.lua; the addon then drops every other "
+                "line, so in a busy raid the ones you need aren't pushed out. Clients load it on /reload."),
+        Setting("bridge", "chat_filter_reload", "/reload clients when the word list changes",
+                "Out of combat only. Off: the banner tells you to /reload (or type /bb all reload)."),
+    ]),
     ("Typing guard", [
         Setting("broadcast", "chatguard", "Pause broadcasting while you type",
                 "Keys aren't copied to other clients while your chat box is open."),

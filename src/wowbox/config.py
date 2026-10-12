@@ -157,6 +157,10 @@ class BridgeConfig(_Model):
     method: Literal["auto", "mss", "dxcam", "printwindow"] = "auto"
     stale_after: Duration = 1.5
     commands: bool = True  # carry out /bb all|others|to <command> typed in a client
+    # write Words.lua (the words your chat rules listen for) so BoxBridge passes on only lines a rule could use
+    chat_filter: bool = True
+    chat_filter_reload: bool = False  # /reload a client out of combat when its Words.lua is out of date
+    addon_dir: str | None = None  # BoxBridge's folder in the game; default: Interface/AddOns/BoxBridge by client.exe
 
 
 class Condition(_Model):

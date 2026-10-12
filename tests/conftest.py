@@ -78,6 +78,13 @@ class Rig:
         return out
 
 
+@pytest.fixture(autouse=True)
+def _no_real_addon_folder(monkeypatch, tmp_path):
+    """Never write Words.lua into a real game folder (a team.yaml copied from yours points at one)."""
+    from wowbox.bridge import words
+    monkeypatch.setattr(words, "addon_dir", lambda exe: tmp_path / "no-game" / "BoxBridge")
+
+
 @pytest.fixture
 def rig():
     return Rig()

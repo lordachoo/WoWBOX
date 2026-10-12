@@ -24,6 +24,7 @@ from .rule_store import automation_path, migrate_rules, save_rules
 from .follow import FollowManager
 from .stack import Stacker, StackManager, StackResult, apart
 from .bridge import BridgePoller, ChatEvent, ClientState
+from .bridge import words
 from .config import AppConfig, RouteConfig, load_config
 from .config_text import set_settings, update_team_yaml
 from .keys import parse_chord
@@ -110,6 +111,13 @@ class Controller(QObject):
                                   moving_since=lambda: self.router.last_movement)
         self._apply_stack_cfg()
         self.overlay = Overlay()
+        # the chat filter (Words.lua) BoxBridge loads: its version, or None when there isn't one
+        self.words_version: int | None = None
+        self.words_problem: str | None = None  # why it couldn't be written
+        self._words_checked = 0.0
+        self._reload_asked: dict[int, float] = {}  # slot -> when WoWBox last typed /reload for the filter
+        self._dropped_seen: dict[int, int] = {}  # slot -> the addon's dropped-lines counter (mod 16) last seen
+        self.dropped: dict[int, int] = {}  # slot -> chat lines its BoxBridge dropped since WoWBox started
 
         self.sig_hotkey.connect(self._on_hotkey)
         self.sig_changed.connect(self._update_overlay)
@@ -139,6 +147,7 @@ class Controller(QObject):
         self.router.start()
         if self.cfg.bridge.enabled:
             self.bridge.start()
+        self.sync_chat_filter()
         self.memread.start()
         self._refresh_timer.start()
         self._auto_timer.start()
@@ -234,6 +243,8 @@ class Controller(QObject):
             self._apply_stack_cfg()
         elif section == "broadcast" and key == "chatguard":
             self.chatguard.enabled = model.chatguard
+        elif section == "bridge" and key == "chat_filter":
+            self.sync_chat_filter()
         elif section == "automation_options" and key == "tick_hz":
             self._auto_timer.setInterval(int(1000 / max(1.0, model.tick_hz)))
         log.info("setting %s.%s = %s", section, key, settings.show(model, key))
@@ -307,6 +318,7 @@ class Controller(QObject):
         self.chatguard.open_keys = self._chords(cfg.broadcast.chatguard_open_keys)
         self.chatguard.close_keys = self._chords(cfg.broadcast.chatguard_close_keys)
         self.engine.load(cfg.automation)
+        self.sync_chat_filter()
         log.info("config reloaded (routes, hotkeys, macros, team, follow, stack, broadcast, automation). "
                  "Restart for other sections.")
         self.sig_changed.emit()
@@ -340,6 +352,8 @@ class Controller(QObject):
 
     def _on_bridge_state(self, slot: int, st: ClientState) -> None:  # bridge thread
         self.chatguard.set_bridge(slot, st.typing and not st.stale)
+        if not st.stale:
+            self._count_dropped(slot, st.chat_dropped)
         c = self.team.clients.get(slot)
         if c and st.name and not st.stale and (st.name, st.class_token) != (c.character, c.class_token):
             c.character, c.class_token = st.name, st.class_token
@@ -438,6 +452,7 @@ class Controller(QObject):
             log.info("automation rules are now kept in %s (team.yaml is left as you wrote it)", path)
         self.cfg.automation = rules
         self.engine.load(rules)
+        self.sync_chat_filter()
         if hasattr(self, "window"):
             self.window.load_automation()
         self.sig_changed.emit()
@@ -673,6 +688,75 @@ class Controller(QObject):
         for slot in self.launcher.refresh():
             self._lost.add(slot)
             self.chatguard.forget(slot)
+        self._check_chat_filter(time.monotonic())
+
+    # ------------------------------------------------------------------ chat filter (Words.lua for BoxBridge)
+    def addon_folder(self) -> Path:
+        return Path(self.cfg.bridge.addon_dir) if self.cfg.bridge.addon_dir else words.addon_dir(self.cfg.client.exe)
+
+    def sync_chat_filter(self) -> None:
+        """Write Words.lua from the chat rules (only when they changed what it says)."""
+        self._words_checked = time.monotonic()
+        if not (self.cfg.bridge.enabled and self.cfg.bridge.chat_filter):
+            self.words_version, self.words_problem = None, None
+            return
+        folder = self.addon_folder()
+        if not folder.is_dir():
+            problem = f"BoxBridge isn't installed at {folder} (set bridge.addon_dir in team.yaml)"
+            if problem != self.words_problem:
+                log.warning("chat filter not written: %s", problem)
+            self.words_version, self.words_problem = None, problem
+            return
+        try:
+            version, changed = words.sync(folder, words.build(self.cfg.automation))
+        except OSError as e:
+            if str(e) != self.words_problem:
+                log.warning("chat filter not written: %s", e)
+            self.words_version, self.words_problem = None, str(e)
+            return
+        self.words_version, self.words_problem = version, None
+        if changed:
+            log.info("chat filter written: %s (version %d). Clients pick it up on /reload.",
+                     folder / words.FILE_NAME, version)
+            self.activity.add("/bb", "chat filter", f"Words.lua version {version} written: /reload clients to use it",
+                              kind="info")
+        self.sig_changed.emit()
+
+    def chat_filter_stale(self) -> list[int]:
+        """Clients whose BoxBridge hasn't loaded the current Words.lua (they need a /reload)."""
+        if self.words_version is None:
+            return []
+        return [c.slot for c in self.team.attached()
+                if c.state and not c.state.stale and c.state.chat_filter != self.words_version]
+
+    def _check_chat_filter(self, now: float) -> None:
+        stale = self.chat_filter_stale()
+        if stale and now - self._words_checked > 10:
+            self.sync_chat_filter()  # the file may have been replaced (a fresh copy of the addon)
+            stale = self.chat_filter_stale()
+        if not (stale and self.cfg.bridge.chat_filter_reload):
+            return
+        for slot in stale:
+            st = self.team.clients[slot].state
+            if st.combat or st.dead or st.ghost or now - self._reload_asked.get(slot, -1e9) < 60:
+                continue
+            self._reload_asked[slot] = now
+            log.info("%s: /reload to load the new chat filter", self.label_for(slot))
+            self.activity.add("/bb", "chat filter", "/reload to load the new Words.lua", [slot], kind="fired")
+            self.router.type_text("/reload", [slot])
+
+    def _count_dropped(self, slot: int, counter: int) -> None:  # bridge thread
+        last = self._dropped_seen.get(slot)
+        self._dropped_seen[slot] = counter
+        if last is None or counter == last:
+            return
+        n = (counter - last) % 16
+        self.dropped[slot] = self.dropped.get(slot, 0) + n
+        c = self.team.clients.get(slot)
+        who = c.name if c else str(slot)
+        log.warning("BoxBridge on %s dropped %d chat line(s): its queue was full", who, n)
+        self.activity.add("/bb", "chat dropped", f"BoxBridge dropped {n} chat line(s) on {who}: queue full",
+                          [slot], kind="skipped")
 
     # StateSource for the automation engine
     def states(self) -> dict[int, ClientState | None]:

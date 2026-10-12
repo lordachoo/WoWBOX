@@ -124,6 +124,9 @@ bridge:                         # needs the BoxBridge addon in every client
   block_size: 8                 # /boxbridge size (default 8); only sizes the capture area
   method: auto                  # auto (screen grab if visible, PrintWindow if covered) | mss | dxcam | printwindow
   stale_after: 1.5s
+  chat_filter: true             # write Words.lua so BoxBridge passes on only lines your chat rules could match
+  chat_filter_reload: false     # /reload a client (out of combat) when its word list is out of date
+  # addon_dir: "C:/Games/WoW335/Interface/AddOns/BoxBridge"   # default: next to client.exe
 
 automation:
   - name: healer-drinks-out-of-combat

@@ -147,9 +147,24 @@ All in-game commands (`/bb` is short for `/boxbridge`):
 | `/bb height <px>` | Override the render height used for pixel snapping. Rarely needed. |
 | `/bb hz <n>` | Strip update rate, 1–60 (default 15). |
 | `/bb chat` | Stop or resume passing chat lines to WoWBox for this client. |
-| `/bb test <Name> <text>` | Pretend `<Name>` whispered `<text>`, for testing chat automation. |
+| `/bb words` | Show the chat filter this client loaded (which words pass, per channel) and how many lines it dropped. |
+| `/bb test <Name> <text>` | Pretend `<Name>` whispered `<text>`, for testing chat automation. It says so if the chat filter drops it. |
 
 Settings are saved per character.
+
+### The chat filter (`Words.lua`)
+
+The strip can carry only about two chat lines a second to WoWBox, and BoxBridge keeps just 10 waiting. In a busy raid, raid chat, /say and /yell alone outrun that, so a "paladin buff" could be pushed out before WoWBox ever saw it.
+
+So WoWBox writes the words and channels of your enabled chat rules into `Words.lua` in the addon's folder in the game, and BoxBridge passes on **only lines a chat rule could match**. Everything else is never queued.
+
+- **Where:** `Interface\AddOns\BoxBridge\Words.lua` next to `client.exe` from `team.yaml`. If the addon lives somewhere else, set `bridge.addon_dir`.
+- **When it's written:** when WoWBox starts, when you save a rule, and on Reload config. Only when the words or channels change.
+- **When a client uses it:** at login or `/reload`. After you change a chat rule's words, type `/bb all reload` when it suits you. Until then, the banner says *Chat filter out of date on …*. To have WoWBox do the `/reload` itself, out of combat, tick *Settings → Chat filter → /reload clients when the word list changes* (`bridge.chat_filter_reload`).
+- **Matching:** the same as the rules: any case, the word anywhere in the line. A rule without words takes every line on its channels. `/bb` commands always pass.
+- **Long lines:** WoWBox sees 27 bytes of each line. When the word comes later in the line, BoxBridge sends the line from that word on, so "sorry to bother you, could I get paladin buff" still works.
+- **When it's still too busy:** whispers, party lines and `/bb` commands go ahead of other channels, and a full queue throws away the least important line. Dropped lines show in the Activity tab (*BoxBridge dropped 3 chat lines on Kunth*) and in `/bb words`.
+- **Off:** untick *Settings → Chat filter → Pass on only lines a chat rule could use* (`bridge.chat_filter: false`). A client without `Words.lua`, or with an older BoxBridge, passes every line, as before.
 
 ## 6. Running WoWBox
 
@@ -765,7 +780,8 @@ BoxBridge passes every whisper, party, raid, guild, officer, say and yell line i
   `to: "{sender}"` targets the sender's own window, if the sender is one of yours.
 - **Placeholders can't inject commands.** Names keep only letters, digits and `-`. Message text loses control characters and WoW escape codes, and can't start a slash command. Still, use `sender:` to ignore strangers.
 - **Heard by several clients.** A party or raid line all your clients hear fires a rule once.
-- **Limits.** The first 27 bytes of each line come through, which is plenty for keywords. Senders get 20 bytes. The addon shows each line for 0.5 s, so a burst of 10 lines takes about 5 s, and status updates pause meanwhile.
+- **Limits.** The first 27 bytes of each line come through (from the matched word on, if it comes later). Senders get 20 bytes. The addon shows each line for 0.5 s, so a burst of 10 lines takes about 5 s, and status updates pause meanwhile. That's why BoxBridge passes on only lines your rules could match: see *The chat filter* in section 5.
+- **New words need a `/reload`.** A new or changed chat rule's words reach the clients' chat filter on their next `/reload` (`/bb all reload`). The banner tells you when one is out of date.
 - **Testing.** `/bb test Tinkerdawn heal me` in Kunth's client acts like a whisper from Tinkerdawn.
 
 ### Recipe: heal and buff bot on whisper
@@ -883,7 +899,8 @@ automation:
 - **Strangers.** A rule without `sender:` reacts to *anyone* who whispers the keyword. For "only my own characters", use `sender: team`. That's what a public buff bot does, but keep `cooldown` up and stay out of combat (`when: {combat: false}`).
 - **Server rules.** Many servers forbid unattended bots. A buff bot that answers strangers while you're away is exactly what they look for. Check your server's rules first.
 - **Range and line of sight.** WoW's own rules still apply. Out of range shows the usual error on that client, and the rule doesn't retry.
-- **Text length.** Only the first 27 characters of a whisper reach WoWBox, so keywords should come early in the message.
+- **Text length.** Only 27 characters of a line reach WoWBox. BoxBridge starts them at your keyword when it comes later, so that's rarely a problem.
+- **Channels.** A rule listens only on its channels. In a raid group, `/party` still reaches your subgroup. For lines typed in `/raid`, add `raid` to the rule's channels.
 - **Exact names.** Spell names must match the game's exactly, including your server's custom spells.
 
 Recipes for anti-AFK, running in to melee and totems are in section 14.
@@ -1228,6 +1245,7 @@ They use fake Win32 implementations, so nothing touches real windows.
 | Bridge stale on a minimized client | Minimized clients don't draw. Use main_thumbs or tabs instead of minimizing. |
 | Character in the wrong slot | Move up/down, then Remember characters. |
 | A rule or command was "skipped: typing" | That client's chat box was open. Close it and try again. |
+| A chat rule fires only sometimes in a raid | `/bb words` in that client: is the word listed for that channel? If not, `/reload` it (the banner says when the filter is out of date). Does the Activity tab show *dropped* lines? Is the rule listening on the channel you typed in (`/raid` vs `/party`)? |
 | `/bb all …` does nothing | Is WoWBox running and attached, and does the Clients tab show live stats for that client? Is the command ≤ 27 bytes? Check the Log tab. |
 | Follow mode doesn't re-follow | Does the State column show `following` while a character follows? If not, `/reload` that client for the current addon. Re-follow also waits during combat or casting, and for the window you're in. |
 | Mirrored movement does nothing in background windows | That client ignores posted movement keys. Use follow mode without mirroring. |

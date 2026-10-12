@@ -1,0 +1,2 @@
+-- WoWBox overwrites this file with the words your chat rules listen for (see src/wowbox/bridge/words.py).
+-- Until it does, BoxBridge passes WoWBox every chat line.

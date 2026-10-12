@@ -7,6 +7,7 @@
 --   /boxbridge hz <n>       update rate (default 15)
 --   /boxbridge status       print current settings
 --   /boxbridge chat         toggle passing chat lines (whisper/party/raid/guild/say/yell) to WoWBox
+--   /boxbridge words        show the chat filter WoWBox wrote (Words.lua): only lines your rules could use pass
 --   /boxbridge test <Name> <text>   pretend <Name> whispered <text> (to test WoWBox chat rules)
 -- Commands for your whole team, typed by WoWBox into each client's chat ("/" is optional):
 --   /bb all <command>       every client, this one included     e.g. /bb all reload
@@ -36,10 +37,14 @@ local CHANNELS = {
   CHAT_MSG_SAY = 6, CHAT_MSG_YELL = 7,
 }
 local COMMAND = 8 -- a /bb all|others|to command: sender field = who, text = the command
+local CHANNEL_NAMES = { "whisper", "party", "raid", "guild", "officer", "say", "yell" } -- by channel byte
+local PRIORITY = { [1] = 3, [2] = 3, [COMMAND] = 4 } -- whispers, party and /bb go first; the rest are 1
 local MAX_COMMAND_BYTES = 27
+local MAX_TEXT_BYTES = 27
 local MAX_QUEUE = 10
 local chatQueue = {}
 local chatSeq = 0
+local dropped = 0 -- lines thrown away because the queue was full (WoWBox sees it mod 16)
 local following = false -- AUTOFOLLOW_BEGIN .. AUTOFOLLOW_END
 local db
 local frame = CreateFrame("Frame", "BoxBridgeFrame", UIParent)
@@ -111,16 +116,64 @@ local function plain(text)
   return text
 end
 
+-- the version of Words.lua loaded (0-63; 0 = none: every line passes)
+local function filterVersion()
+  local f = BoxBridgeWords
+  if type(f) ~= "table" or type(f.channels) ~= "table" then return 0 end
+  return (tonumber(f.version) or 0) % 64
+end
+
+-- does a chat rule want this line? Returns whether it passes and where the text to send starts:
+-- a match past the 27 bytes WoWBox sees is sent from the matched word on, so the rule still sees it
+local function wanted(channel, text)
+  if filterVersion() == 0 then return true, 1 end
+  local words = BoxBridgeWords.channels[CHANNEL_NAMES[channel] or ""]
+  if words == "all" then return true, 1 end
+  if type(words) ~= "table" then return false end
+  local lower = string.lower(text)
+  local at, len
+  for _, w in ipairs(words) do
+    local i = string.find(lower, w, 1, true)
+    if i and (not at or i < at or (i == at and #w > len)) then at, len = i, #w end
+  end
+  if not at then return false end
+  if at + len - 1 <= MAX_TEXT_BYTES then return true, 1 end
+  return true, at
+end
+
+local function priority(ev) return PRIORITY[ev.channel] or 1 end
+
+-- queue a line for WoWBox. Returns false (and why) when it isn't passed on
 local function queueChat(channel, sender, text)
-  if #chatQueue >= MAX_QUEUE then table.remove(chatQueue, 1) end
+  text = plain(text)
+  local length = #text
+  if channel ~= COMMAND then
+    local ok, at = wanted(channel, text)
+    if not ok then return false, "no chat rule listens for it" end
+    if at > 1 then text = string.sub(text, at) end
+  end
   chatSeq = chatSeq % 255 + 1
-  chatQueue[#chatQueue + 1] = { seq = chatSeq, channel = channel, sender = sender or "", text = plain(text) }
+  local ev = { seq = chatSeq, channel = channel, sender = sender or "", text = text, length = length }
+  local first = (chatQueue[1] and chatQueue[1].untilTime) and 2 or 1 -- never pull the line on screen
+  if #chatQueue >= MAX_QUEUE then
+    local victim
+    for i = first, #chatQueue do -- the oldest of the least important
+      if not victim or priority(chatQueue[i]) < priority(chatQueue[victim]) then victim = i end
+    end
+    dropped = dropped + 1
+    if not victim or priority(ev) < priority(chatQueue[victim]) then return false, "queue full" end
+    table.remove(chatQueue, victim)
+  end
+  local pos = #chatQueue + 1 -- behind everything at least as important
+  while pos > first and priority(chatQueue[pos - 1]) < priority(ev) do pos = pos - 1 end
+  table.insert(chatQueue, pos, ev)
+  return true
 end
 
 local function chatFrame(ev)
-  local d = { MAGIC_A, MAGIC_CHAT, counter, ev.seq, ev.channel, math.min(#ev.text, 255) }
+  local d = { MAGIC_A, MAGIC_CHAT, counter, ev.seq, ev.channel, math.min(ev.length or #ev.text, 255) }
   addText(d, ev.sender, 20)
-  addText(d, ev.text, 27)
+  addText(d, ev.text, MAX_TEXT_BYTES)
   d[#d + 1] = inputFlags() -- this frame stands in for state frames while it's held
   return d
 end
@@ -187,10 +240,10 @@ local function snapshot()
       tExists and UnitIsPlayer("target"), tExists and UnitAffectingCombat("target")),
     bits(UnitAffectingCombat("player"), IsResting(), inParty, inRaid),
     inputFlags(),
-    bits(casting, channeling),
+    bits(casting, channeling) + filterVersion() * 4,
     bits(IsMounted(), UnitIsDead("player"), UnitIsGhost("player"), UnitIsAFK("player"), following),
     partyHp[1], partyHp[2], partyHp[3], partyHp[4],
-    level, partyBits,
+    level, partyBits + (dropped % 16) * 16,
   }
   addText(d, UnitName("player"), 23)
   d[#d + 1] = CLASS_IDS[classToken or ""] or 0
@@ -330,8 +383,22 @@ SlashCmdList["BOXBRIDGE"] = function(msg)
       p("usage: /boxbridge test <Name> <text>")
       return
     end
-    queueChat(CHANNELS.CHAT_MSG_WHISPER, who, text)
-    p("test whisper from " .. who .. ": " .. text)
+    local ok, why = queueChat(CHANNELS.CHAT_MSG_WHISPER, who, text)
+    p("test whisper from " .. who .. ": " .. text .. (ok and "" or " (not passed to WoWBox: " .. why .. ")"))
+    return
+  elseif cmd == "words" then
+    local v = filterVersion()
+    if v == 0 then
+      p("no chat filter (Words.lua not written by WoWBox yet, or this BoxBridge is older): every line passes")
+    else
+      p("chat filter version " .. v .. " (WoWBox rewrites Words.lua when your chat rules change; /reload to load it)")
+      for _, ch in ipairs(CHANNEL_NAMES) do
+        local w = BoxBridgeWords.channels[ch]
+        if w == "all" then p("  " .. ch .. ": every line")
+        elseif type(w) == "table" then p("  " .. ch .. ": " .. table.concat(w, ", ")) end
+      end
+    end
+    p(dropped .. " line(s) dropped since login because the queue was full")
     return
   elseif cmd == "stack" or cmd == "follow" or cmd == "stay" or cmd == "mirror" then
     if not db.enabled then
@@ -361,12 +428,13 @@ SlashCmdList["BOXBRIDGE"] = function(msg)
     p("-> " .. who .. ": " .. text)
     return
   elseif cmd == "status" then
-    p(string.format("enabled=%s size=%d height=%s (using %d) hz=%d chat=%s", tostring(db.enabled), db.size,
-      tostring(db.height), renderHeight(), db.hz, tostring(db.chat)))
+    p(string.format("enabled=%s size=%d height=%s (using %d) hz=%d chat=%s chat filter=%s dropped=%d",
+      tostring(db.enabled), db.size, tostring(db.height), renderHeight(), db.hz, tostring(db.chat),
+      filterVersion() == 0 and "none" or ("version " .. filterVersion()), dropped))
     return
   else
     p("usage: /bb [all|others <command> | to <who> <command> | stack | follow | stay | mirror | size <px> | "
-      .. "height <px> | hz <n> | chat | test <Name> <text> | status]")
+      .. "height <px> | hz <n> | chat | words | test <Name> <text> | status]")
     return
   end
   apply()

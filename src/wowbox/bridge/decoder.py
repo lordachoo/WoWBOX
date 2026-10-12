@@ -10,9 +10,10 @@ Byte stream (2 bytes per block):
      0  0xB0 magic           1  0x0E magic           2  frame counter
      3  health 0-255         4  power 0-255          5  power type
      6  target health        7  target flags         8  player flags
-     9  input flags         10  cast flags          11  status flags
+     9  input flags         10  cast flags (bits 0-1); bits 2-7: version of the chat filter loaded (Words.lua, 0 = none)
+    11  status flags
     12  party1 health       13  party2 health       14  party3 health    15  party4 health
-    16  level               17  party-exists bits
+    16  level               17  party-exists bits (0-3); bits 4-7: chat lines dropped (queue full), mod 16
     18-40  character name, UTF-8, zero padded (23 bytes)
     41  class (CLASS_IDS)
     42-44  map x, 0-16777215 = 0.0-1.0 (GetPlayerMapPosition; high byte first)
@@ -122,6 +123,8 @@ class ClientState:
     map_id: int = 0
     map_level: int = 0
     fps: int = 0  # the client's frame rate: keys only register once per frame
+    chat_filter: int = 0  # version of Words.lua the addon loaded (0: none, or an older addon: every line passes)
+    chat_dropped: int = 0  # chat lines the addon threw away because its queue was full, mod 16
     level: int = 0
     party_health_pct: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
     party_exists: tuple[bool, bool, bool, bool] = (False, False, False, False)
@@ -249,12 +252,13 @@ def _to_state(d: bytes) -> ClientState:
         combat=bool(pf & P_COMBAT), resting=bool(pf & P_RESTING), in_party=bool(pf & P_PARTY),
         in_raid=bool(pf & P_RAID),
         typing=bool(inp & I_TYPING), chat_open=bool(inp & I_CHAT),
-        casting=bool(cast & C_CASTING), channeling=bool(cast & C_CHANNELING),
+        casting=bool(cast & C_CASTING), channeling=bool(cast & C_CHANNELING), chat_filter=cast >> 2,
         mounted=bool(st & S_MOUNTED), dead=bool(st & S_DEAD), ghost=bool(st & S_GHOST), afk=bool(st & S_AFK),
         following=bool(st & S_FOLLOWING),
         party_health_pct=(_pct(d[12]), _pct(d[13]), _pct(d[14]), _pct(d[15])),
         level=d[16],
         party_exists=tuple(bool(pbits & (1 << i)) for i in range(4)),  # type: ignore[arg-type]
+        chat_dropped=pbits >> 4,
         name=_text(d[NAME_BYTES_V1 if d[1] == KIND_STATE_V1 else NAME_BYTES]),
         class_token=_text(d[CLASS_BYTES]) if d[1] == KIND_STATE_V1 else CLASS_TOKENS.get(d[41], ""),
         **({} if d[1] == KIND_STATE_V1 else _position(d)),
@@ -281,8 +285,8 @@ def encode_bytes(values: dict, frame: int) -> list[int]:
     data = [MAGIC[0], KIND_STATE, frame % 256,
             v.get("health", 0), v.get("power", 0), v.get("power_type", 0),
             v.get("target_health", 0), v.get("target_flags", 0), v.get("player_flags", 0),
-            v.get("input_flags", 0), v.get("cast_flags", 0), v.get("status_flags", 0),
-            *party[:4], v.get("level", 0), v.get("party_bits", 0)]
+            v.get("input_flags", 0), v.get("cast_flags", 0) | (v.get("chat_filter", 0) << 2), v.get("status_flags", 0),
+            *party[:4], v.get("level", 0), v.get("party_bits", 0) | (v.get("chat_dropped", 0) % 16) << 4]
     data += list(v.get("name", "").encode("utf-8")[:23].ljust(23, bytes(1)))
     data.append(CLASS_IDS.get(v.get("class", ""), 0))
     pos = v.get("pos")  # (x, y, facing, map_id, level) or None

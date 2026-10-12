@@ -1,6 +1,7 @@
 ## Interface: 30300
 ## Title: BoxBridge
 ## Notes: WoWBox pixel bridge: encodes player/target/party state as coloured blocks in the top-left corner. /boxbridge
-## Version: 1.0
+## Version: 1.1
 ## SavedVariablesPerCharacter: BoxBridgeDB
+Words.lua
 BoxBridge.lua
