@@ -517,3 +517,18 @@ def test_chat_rule_with_a_condition_gets_name_too():
     e.source.st[1] = ClientState(name="Tinkerdawn", health_pct=70.0)
     e.on_chat(3, whisper(text="heal"), now=0)
     assert typed(sender) == ["/cast [@Tinkerdawn] Healing Wave"]
+
+
+def test_poller_warns_when_reads_fall_behind(caplog):
+    r, t, cap, poller, events = _poller()
+    poller.poll_once(cap)
+    t[0] = 0.1
+    poller.poll_once(cap)
+    assert "between reads" not in caplog.text
+    t[0] = 2.0  # Windows held WoWBox back: a held chat line could have come and gone
+    poller.poll_once(cap)
+    assert "1.9s between reads" in caplog.text
+    caplog.clear()
+    t[0] = 4.0
+    poller.poll_once(cap)
+    assert "between reads" not in caplog.text  # once a minute, not every read

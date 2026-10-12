@@ -95,3 +95,23 @@ def all_top_level_windows() -> list[int]:
 
 def scan_code(vk: int) -> int:
     return user32.MapVirtualKeyW(vk, 0) & 0xFF
+
+
+class _PowerThrottlingState(ctypes.Structure):
+    _fields_ = [("Version", wt.ULONG), ("ControlMask", wt.ULONG), ("StateMask", wt.ULONG)]
+
+
+def disable_power_throttling() -> bool:
+    """Opt out of Windows' efficiency mode for this process. While WoWBox's window is minimized or hidden,
+    Windows 11 otherwise slows its threads down, and the bridge then misses chat lines (each is on screen
+    for only half a second). Returns whether Windows accepted it (older Windows: False, nothing to do)."""
+    process_power_throttling = 4
+    execution_speed, ignore_timer_resolution = 0x1, 0x4
+    state = _PowerThrottlingState(1, execution_speed | ignore_timer_resolution, 0)  # controlled, and off
+    fn = getattr(kernel32, "SetProcessInformation", None)
+    if fn is None:
+        return False
+    fn.argtypes = [wt.HANDLE, ctypes.c_int, ctypes.c_void_p, wt.DWORD]
+    fn.restype = wt.BOOL
+    return bool(fn(kernel32.GetCurrentProcess(), process_power_throttling, ctypes.byref(state),
+                   ctypes.sizeof(state)))

@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+SLOW_POLL = 0.4  # seconds between reads: a chat line is held ~0.5 s, so slower than this can miss it
 BOOST_HZ = 30.0  # while stacking: fresher positions mean shorter waits between moves
 
 
@@ -39,6 +40,8 @@ class BridgePoller:
         self.last_error: dict[int, str] = {}
         self.last_method: dict[int, str] = {}
         self._boost_until = 0.0
+        self._last_poll: float | None = None
+        self._slow_warned = -1e9
 
     @property
     def region(self) -> Rect:
@@ -81,6 +84,12 @@ class BridgePoller:
 
     def poll_once(self, cap: CaptureAPI) -> None:
         now = self._clock()
+        if self._last_poll is not None and now - self._last_poll > SLOW_POLL and now - self._slow_warned > 60:
+            self._slow_warned = now
+            log.warning("bridge: %.1fs between reads (should be %.1fs): chat lines and /bb commands can be "
+                        "missed. Is Windows slowing WoWBox down (efficiency mode, or the PC is busy)?",
+                        now - self._last_poll, 1.0 / max(0.5, self.cfg.hz))
+        self._last_poll = now
         for c in self.team.attached():
             slot, hwnd = c.slot, c.hwnd
             state: ClientState | None = None

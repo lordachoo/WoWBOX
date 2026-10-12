@@ -1246,6 +1246,7 @@ They use fake Win32 implementations, so nothing touches real windows.
 | Character in the wrong slot | Move up/down, then Remember characters. |
 | A rule or command was "skipped: typing" | That client's chat box was open. Close it and try again. |
 | A chat rule fires only sometimes in a raid | `/bb words` in that client: is the word listed for that channel? If not, `/reload` it (the banner says when the filter is out of date). Does the Activity tab show *dropped* lines? Is the rule listening on the channel you typed in (`/raid` vs `/party`)? |
+| Chat rules and `/bb` stop working while WoWBox is minimized, and work again once you open it | Windows was slowing WoWBox down in the background (efficiency mode), so it missed the half second each line is shown. WoWBox now opts out of that at start-up; if the Log tab still says *seconds between reads*, check Task Manager for efficiency mode on WoWBox, or whether the PC is busy. |
 | `/bb all …` does nothing | Is WoWBox running and attached, and does the Clients tab show live stats for that client? Is the command ≤ 27 bytes? Check the Log tab. |
 | Follow mode doesn't re-follow | Does the State column show `following` while a character follows? If not, `/reload` that client for the current addon. Re-follow also waits during combat or casting, and for the window you're in. |
 | Mirrored movement does nothing in background windows | That client ignores posted movement keys. Use follow mode without mirroring. |

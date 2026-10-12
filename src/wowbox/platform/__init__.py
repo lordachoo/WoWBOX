@@ -12,8 +12,13 @@ __all__ = ["CaptureAPI", "InputAPI", "KeyEvent", "MonitorInfo", "Rect", "WindowA
 def create_platform() -> tuple[WindowAPI, InputAPI]:
     if sys.platform != "win32":
         raise RuntimeError("WoWBox needs Windows")
+    import logging
+
+    from ._win32 import disable_power_throttling
     from .win32_input import Win32Input
     from .win32_windows import Win32Windows
+    if not disable_power_throttling():
+        logging.getLogger(__name__).info("couldn't turn off Windows efficiency mode for WoWBox")
     return Win32Windows(), Win32Input()
 
 
