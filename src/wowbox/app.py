@@ -738,6 +738,8 @@ class Controller(QObject):
             return
         for slot in stale:
             st = self.team.clients[slot].state
+            if st.chat_filter == 0:  # no Words.lua loaded at all: a /reload won't help, a game restart will
+                continue
             if st.combat or st.dead or st.ghost or now - self._reload_asked.get(slot, -1e9) < 60:
                 continue
             self._reload_asked[slot] = now

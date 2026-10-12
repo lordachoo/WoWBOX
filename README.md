@@ -120,7 +120,7 @@ powershell -ExecutionPolicy Bypass -File setup.ps1
 
 ## 5. The BoxBridge addon and `/bb` commands
 
-Copy `addon\BoxBridge` to `<WoW>\Interface\AddOns\BoxBridge` and enable it on the character screen for **every** character. After updating the addon, `/reload` every client.
+Copy `addon\BoxBridge` to `<WoW>\Interface\AddOns\BoxBridge` and enable it on the character screen for **every** character. After updating the addon, `/reload` every client. When an update adds a file to the addon (as 1.1 added `Words.lua`), **quit and restart** the clients instead: WoW reads an addon's list of files only at start-up.
 
 A thin strip of coloured squares appears in the top-left corner. That's the bridge: leave it visible, and don't cover it with other UI. WoWBox works without the bridge, but then you lose:
 - live status;

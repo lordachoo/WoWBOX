@@ -628,11 +628,17 @@ class MainWindow(QMainWindow):
         if held := c.router.waiting():
             lines.append("Waiting for you to stop typing or pressing keys: " + ", ".join(
                 f"{name(s)} ({n} queued)" for s, n in sorted(held.items())) + ". It goes out when you stop.")
-        if stale := c.chat_filter_stale():
-            lines.append(f"<b>Chat filter out of date</b> on {', '.join(name(s) for s in stale)}: your chat rules "
-                         "changed, and BoxBridge only loads the new word list on <b>/reload</b> (type "
-                         "<code>/bb all reload</code>). Until then those clients pass on the old list's lines. "
-                         "If a /reload doesn't clear this, copy the new addon/BoxBridge folder into the game.")
+        stale = c.chat_filter_stale()
+        none = [s for s in stale if c.team.clients[s].state.chat_filter == 0]
+        if old := [s for s in stale if s not in none]:
+            lines.append(f"<b>Chat filter out of date</b> on {', '.join(name(s) for s in old)}: your chat rules "
+                         "changed, and BoxBridge loads the new word list on <b>/reload</b> (type "
+                         "<code>/bb all reload</code>). Until then those clients pass on the old list's lines.")
+        if none:
+            lines.append(f"<b>No chat filter loaded</b> on {', '.join(name(s) for s in none)}, so they pass on every "
+                         "chat line. If you just updated BoxBridge, <b>quit and restart</b> those WoW clients once: "
+                         "WoW reads an addon's list of files only at start-up, so a /reload can't load the new "
+                         "Words.lua. Otherwise copy the new addon/BoxBridge folder into the game.")
         if gone := c.missing_windows():
             lines.append(f"Window closed: {', '.join(name(s) for s in gone)}. Left out of broadcasting and rules; "
                          "Attach or Launch brings it back.")

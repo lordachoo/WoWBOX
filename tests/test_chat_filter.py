@@ -189,6 +189,9 @@ def test_controller_writes_words_and_flags_clients_that_need_a_reload(controller
     assert not c.router.waiting() and not c._reload_asked  # in combat: no /reload
     c.team.clients[2].state = ClientState(name="B", chat_filter=0)
     c._check_chat_filter(200.0)
+    assert not c._reload_asked  # no list loaded at all: /reload can't help (the game must restart)
+    c.team.clients[2].state = ClientState(name="B", chat_filter=5)
+    c._check_chat_filter(300.0)
     assert list(c._reload_asked) == [2]  # out of combat: /reload typed in that client only
     c.cfg.bridge.chat_filter = False
     c.sync_chat_filter()
