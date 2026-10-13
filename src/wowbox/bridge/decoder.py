@@ -169,11 +169,20 @@ def _close(px: np.ndarray, rgb: tuple[int, int, int], tol: int) -> bool:
 
 def _runs(row: np.ndarray, tol: int) -> list[tuple[int, int]]:
     """Split a pixel row into (start, length) runs of near-constant colour."""
+    px = row.astype(np.int16)
+    n = px.shape[0]
     runs, start = [], 0
-    for x in range(1, row.shape[0] + 1):
-        if x == row.shape[0] or np.abs(row[x].astype(int) - row[start].astype(int)).max() > tol:
-            runs.append((start, x - start))
-            start = x
+    while start < n:  # a numpy step per run, not one per pixel (this ran ~30,000 times a second)
+        end = start + 1
+        while end < n:  # look ahead a block or two at a time: runs are short
+            far = np.abs(px[end:end + 64] - px[start]).max(axis=1) > tol
+            if far.any():
+                end += int(far.argmax())
+                break
+            end += 64
+        end = min(end, n)
+        runs.append((start, end - start))
+        start = end
     return runs
 
 

@@ -87,3 +87,22 @@ def test_corrupt_block_fails_checksum():
 def test_strip_cut_off():
     with pytest.raises(DecodeError, match="blocks visible"):
         decode(frame()[:, : 8 * 10])
+
+
+def test_fast_run_splitter_matches_the_pixel_by_pixel_one():
+    from wowbox.bridge.decoder import _runs
+
+    def slow(row, tol):
+        runs, start = [], 0
+        for x in range(1, row.shape[0] + 1):
+            if x == row.shape[0] or np.abs(row[x].astype(int) - row[start].astype(int)).max() > tol:
+                runs.append((start, x - start))
+                start = x
+        return runs
+
+    rng = np.random.default_rng(7)
+    for _ in range(200):
+        widths = rng.integers(1, 150, size=rng.integers(1, 20))
+        row = np.concatenate([np.tile(rng.integers(0, 256, 3), (w, 1)) for w in widths]).astype(np.int16)
+        row = np.clip(row + rng.integers(-5, 6, row.shape), 0, 255).astype(np.uint8)  # capture noise around tol
+        assert _runs(row, 4) == slow(row, 4)
