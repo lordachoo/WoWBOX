@@ -84,6 +84,8 @@ class Router:
         self._wait_lock = threading.Lock()
         self._deferrer: threading.Thread | None = None
         self._stop = threading.Event()
+        self.heartbeat: Callable[[], None] = lambda: None  # the defer loop calls it each time round (diagnostics)
+        self.sending_since: float | None = None  # when the sender started on what it's doing now (None: idle)
 
     # -- lifecycle --------------------------------------------------------
     def start(self) -> None:
@@ -301,7 +303,7 @@ class Router:
             return None
         if self.chatguard.paused(slot):
             return "typing"
-        if any(not p.hotkey for p in self._pressed.values()) or \
+        if any(not p.hotkey for p in tuple(self._pressed.values())) or \
                 self.clock() - self._last_key_down < self.cfg.type_quiet:
             return "keys"
         return None
@@ -362,6 +364,7 @@ class Router:
 
     def _defer_loop(self) -> None:
         while not self._stop.wait(DEFER_POLL):
+            self.heartbeat()
             if self._waiting:
                 try:
                     self._pump()
@@ -380,10 +383,17 @@ class Router:
             op = self._q.get()
             if op is None:
                 return
+            self.sending_since = time.monotonic()
             try:
                 self._execute(op)
             except Exception:
                 log.exception("send failed: %r", op)
+            finally:
+                self.sending_since = None
+
+    @property
+    def running(self) -> bool:
+        return self._deferrer is not None and self._deferrer.is_alive()
 
     def _execute(self, op: tuple) -> None:
         kind = op[0]

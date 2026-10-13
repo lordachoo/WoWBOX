@@ -21,7 +21,7 @@ def setup_logging(log_dir: Path, level: str) -> None:
     log_dir.mkdir(parents=True, exist_ok=True)
     root = logging.getLogger()
     root.setLevel(logging.DEBUG)
-    fh = logging.handlers.RotatingFileHandler(log_dir / "wowbox.log", maxBytes=2_000_000, backupCount=3,
+    fh = logging.handlers.RotatingFileHandler(log_dir / "wowbox.log", maxBytes=5_000_000, backupCount=5,
                                               encoding="utf-8")
     fh.setLevel(logging.DEBUG)
     fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)-7s %(threadName)s %(name)s: %(message)s"))
@@ -47,6 +47,9 @@ def main(argv: list[str] | None = None) -> int:
     sys.setswitchinterval(0.0005)
     setup_logging(base / "logs", args.log_level)
     log = logging.getLogger("wowbox")
+    from .diagnostics import Diagnostics
+    diag = Diagnostics(base / "logs")
+    diag.install()  # crash.log, uncaught errors, and "did the last WoWBox shut down cleanly?"
 
     cfg_path: Path = args.config
     if not cfg_path.exists():
@@ -71,6 +74,7 @@ def main(argv: list[str] | None = None) -> int:
               f"{len(cfg.macros)} macros, {len(cfg.automation)} automation rules)")
         return 0
 
+    from PySide6.QtCore import QtMsgType, qInstallMessageHandler
     from PySide6.QtWidgets import QApplication
 
     from .app import Controller
@@ -78,11 +82,16 @@ def main(argv: list[str] | None = None) -> int:
     from .ui.main_window import MainWindow
     from .ui.tray import Tray
 
+    qt_log = logging.getLogger("qt")
+    levels = {QtMsgType.QtDebugMsg: logging.DEBUG, QtMsgType.QtInfoMsg: logging.INFO,
+              QtMsgType.QtWarningMsg: logging.WARNING, QtMsgType.QtCriticalMsg: logging.ERROR,
+              QtMsgType.QtFatalMsg: logging.CRITICAL}
+    qInstallMessageHandler(lambda kind, _ctx, msg: qt_log.log(levels.get(kind, logging.WARNING), "%s", msg))
     app = QApplication(sys.argv)
     app.setApplicationName("WoWBox")
     app.setQuitOnLastWindowClosed(False)
     windows, input_api = create_platform()
-    controller = Controller(cfg_path.resolve(), cfg, windows, input_api, create_capture)
+    controller = Controller(cfg_path.resolve(), cfg, windows, input_api, create_capture, diag=diag)
     window = MainWindow(controller)
     controller.window = window
     tray = Tray(controller, window)
@@ -94,7 +103,10 @@ def main(argv: list[str] | None = None) -> int:
         from PySide6.QtCore import QTimer
         QTimer.singleShot(int(args.quit_after * 1000), window.quit_app)
     log.info("pid %d, config %s", os.getpid(), cfg_path)
-    return app.exec()
+    code = app.exec()
+    diag.clean_exit()
+    log.info("WoWBox exited (code %d)", code)
+    return code
 
 
 if __name__ == "__main__":

@@ -115,3 +115,47 @@ def disable_power_throttling() -> bool:
     fn.restype = wt.BOOL
     return bool(fn(kernel32.GetCurrentProcess(), process_power_throttling, ctypes.byref(state),
                    ctypes.sizeof(state)))
+
+
+class _ProcessMemoryCounters(ctypes.Structure):
+    _fields_ = [("cb", wt.DWORD), ("PageFaultCount", wt.DWORD), ("PeakWorkingSetSize", ctypes.c_size_t),
+                ("WorkingSetSize", ctypes.c_size_t), ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPagedPoolUsage", ctypes.c_size_t), ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaNonPagedPoolUsage", ctypes.c_size_t), ("PagefileUsage", ctypes.c_size_t),
+                ("PeakPagefileUsage", ctypes.c_size_t)]
+
+
+_proto(kernel32.GetCurrentProcess, [], wt.HANDLE)
+_proto(kernel32.K32GetProcessMemoryInfo, [wt.HANDLE, ctypes.POINTER(_ProcessMemoryCounters), wt.DWORD], wt.BOOL)
+_proto(kernel32.GetProcessHandleCount, [wt.HANDLE, ctypes.POINTER(wt.DWORD)], wt.BOOL)
+_proto(user32.GetGuiResources, [wt.HANDLE, wt.DWORD], wt.DWORD)
+
+
+def process_counters() -> dict[str, int]:
+    """This process's memory (bytes), kernel handles, and GDI/USER objects (Windows allows 10,000 of each)."""
+    me = kernel32.GetCurrentProcess()
+    out: dict[str, int] = {}
+    mem = _ProcessMemoryCounters()
+    mem.cb = ctypes.sizeof(mem)
+    if kernel32.K32GetProcessMemoryInfo(me, ctypes.byref(mem), mem.cb):
+        out.update(working_set=mem.WorkingSetSize, peak_working_set=mem.PeakWorkingSetSize,
+                   private=mem.PagefileUsage)
+    handles = wt.DWORD()
+    if kernel32.GetProcessHandleCount(me, ctypes.byref(handles)):
+        out["handles"] = handles.value
+    out["gdi"] = user32.GetGuiResources(me, 0)
+    out["user"] = user32.GetGuiResources(me, 1)
+    return out
+
+
+def process_alive(pid: int) -> bool:
+    """Whether a process with this id is still running."""
+    query_limited_information, still_active = 0x1000, 259
+    h = kernel32.OpenProcess(query_limited_information, False, pid)
+    if not h:
+        return False
+    try:
+        code = wt.DWORD()
+        return bool(kernel32.GetExitCodeProcess(h, ctypes.byref(code))) and code.value == still_active
+    finally:
+        kernel32.CloseHandle(h)

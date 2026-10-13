@@ -43,6 +43,14 @@ class StateSource(Protocol):
     def slots_for(self, target: Target) -> list[int]: ...
 
 
+def _rules(names: list[str]) -> str:
+    """"rule 'x'" for one (so the activity feed files it under that rule), else "5 rules (a, b, c, ...)"."""
+    if len(names) == 1:
+        return f"rule {names[0]!r}"
+    shown = ", ".join(names[:3]) + (", ..." if len(names) > 3 else "")
+    return f"{len(names)} rules ({shown})"
+
+
 def compile_condition(cond: Condition) -> list[tuple[str, Callable[[object, object], bool], object]]:
     preds = []
     for key, value in (cond.model_extra or {}).items():
@@ -352,11 +360,14 @@ class AutomationEngine:
         for rt in self.rules:
             if rt.enabled and (why := self.blocked_reason(rt, stale)):
                 blocked[rt.rule.name] = why
+        newly: dict[str, list[str]] = {}  # one line per reason, not one per rule
         for name, why in blocked.items():
             if self.blocked.get(name) != why:
-                self._event(f"rule {name!r} paused: {why}")
-        for name in self.blocked.keys() - blocked.keys():
-            self._event(f"rule {name!r} resumed")
+                newly.setdefault(why, []).append(name)
+        for why, names in newly.items():
+            self._event(f"{_rules(names)} paused: {why}")
+        if back := sorted(self.blocked.keys() - blocked.keys()):
+            self._event(f"{_rules(back)} resumed")
         self.blocked = blocked
         gone = self.source.missing_windows()
         if gone != self._gone:

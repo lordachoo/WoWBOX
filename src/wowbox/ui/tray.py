@@ -34,13 +34,20 @@ class Tray(QSystemTrayIcon):
         self.act_auto = QAction("Automation", menu, checkable=True, triggered=lambda on: self.c.engine.set_enabled(on))
         self.act_overlay = QAction("Overlay", menu, checkable=True, triggered=lambda on: self.c.set_overlay(on))
         act_release = QAction("Release all keys", menu, triggered=self.c.router.release_all)
+        act_logs = QAction("Open logs folder", menu, triggered=self._open_logs)
+        act_logs.setVisible(self.c.diag.log_dir is not None)
         act_quit = QAction("Quit", menu, triggered=self.window.quit_app)
-        for a in (self.act_show, None, self.act_broadcast, self.act_auto, self.act_overlay, act_release, None, act_quit):
+        for a in (self.act_show, None, self.act_broadcast, self.act_auto, self.act_overlay, act_release, None,
+                  act_logs, act_quit):
             menu.addSeparator() if a is None else menu.addAction(a)
         self.setContextMenu(menu)
         self._menu = menu
         self.activated.connect(self._on_activated)
         self.refresh()
+
+    def _open_logs(self) -> None:
+        import os
+        os.startfile(self.c.diag.log_dir)  # noqa: S606 (Windows only, our own folder)
 
     def _show(self) -> None:
         self.window.showNormal()

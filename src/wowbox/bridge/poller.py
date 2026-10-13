@@ -42,11 +42,24 @@ class BridgePoller:
         self._boost_until = 0.0
         self._last_poll: float | None = None
         self._slow_warned = -1e9
+        self.heartbeat: Callable[[], None] = lambda: None  # called each time round (the diagnostics watchdog)
+        # for the dropout lines and the health line
+        self._down: dict[int, float] = {}  # slot -> when its bridge became unreadable
+        self._capture_ms: dict[int, float] = {}  # slot -> how long its last capture took
+        self._stats: dict[int, list[float]] = {}  # slot -> [captures, total ms, worst ms] since the last report
+        self._reads = 0
+        self._worst_gap = 0.0
+        self._dropouts = 0
+        self._down_total = 0.0
 
     @property
     def region(self) -> Rect:
         b = self.cfg.block_size
         return Rect(0, 0, b * NUM_BLOCKS * 2 + 4, max(2, b * 2))  # room for up to 2x scale mismatch
+
+    @property
+    def running(self) -> bool:
+        return self._thread is not None and self._thread.is_alive()
 
     def start(self) -> None:
         if self._thread is None:
@@ -68,6 +81,7 @@ class BridgePoller:
         cap = self._capture_factory()
         try:
             while not self._stop.is_set():
+                self.heartbeat()
                 t0 = self._clock()
                 period = 1.0 / (BOOST_HZ if t0 < self._boost_until else max(0.5, self.cfg.hz))
                 self.poll_once(cap)
@@ -89,6 +103,9 @@ class BridgePoller:
             log.warning("bridge: %.1fs between reads (should be %.1fs): chat lines and /bb commands can be "
                         "missed. Is Windows slowing WoWBox down (efficiency mode, or the PC is busy)?",
                         now - self._last_poll, 1.0 / max(0.5, self.cfg.hz))
+        gap = now - self._last_poll if self._last_poll is not None else 0.0
+        self._worst_gap = max(self._worst_gap, gap)
+        self._reads += 1
         self._last_poll = now
         for c in self.team.attached():
             slot, hwnd = c.slot, c.hwnd
@@ -101,7 +118,12 @@ class BridgePoller:
                 region = Rect(0, 0, min(r.w, client.w), min(r.h, client.h))
                 method = self.choose_method(hwnd, client)
                 self.last_method[slot] = method
-                frame = decode_frame(cap.capture(hwnd, region, method))
+                t = time.perf_counter()
+                try:
+                    img = cap.capture(hwnd, region, method)
+                finally:
+                    self._timed(slot, (time.perf_counter() - t) * 1000)
+                frame = decode_frame(img)
                 self.last_error.pop(slot, None)
                 if isinstance(frame, ChatEvent):
                     self._chat(c, slot, hwnd, frame, now)
@@ -120,6 +142,8 @@ class BridgePoller:
                     self._last_frame[hwnd] = (state.frame, now)
                 state.stale = now - self._last_frame[hwnd][1] > self.cfg.stale_after
                 state.updated_at = now
+                if c.hwnd == hwnd:
+                    self._track(c, slot, now, gap, state.stale, frame=state.frame)
             else:
                 # no readable frame: once the last good one is old enough, report it stale (once)
                 last = c.state
@@ -127,6 +151,8 @@ class BridgePoller:
                     continue
                 last.stale = True
                 state = last
+                if c.hwnd == hwnd:
+                    self._track(c, slot, now, gap, True)
             if c.hwnd != hwnd:  # slot was swapped while we were capturing; drop this sample
                 continue
             c.state = state
@@ -143,8 +169,56 @@ class BridgePoller:
             # no state frames while a chat line is held: carry its typing flags and keep the client fresh,
             # or a rule would see the chat box you just typed `/bb test` in as still open
             c.state = replace(c.state, typing=ev.typing, chat_open=ev.chat_open, stale=False, updated_at=now)
+            self._track(c, slot, now, 0.0, False)
             self.on_state(slot, c.state)
         if self._chat_seq.get(hwnd) == ev.seq:
             return
         self._chat_seq[hwnd] = ev.seq
         self.on_chat(slot, ev)
+
+    # ------------------------------------------------------------------ diagnostics
+    def _timed(self, slot: int, ms: float) -> None:
+        self._capture_ms[slot] = ms
+        st = self._stats.setdefault(slot, [0, 0.0, 0.0])
+        st[0] += 1
+        st[1] += ms
+        st[2] = max(st[2], ms)
+
+    def _track(self, c, slot: int, now: float, gap: float, stale: bool, frame: int | None = None) -> None:
+        """One line when a client's bridge becomes unreadable (and why), one when it's back."""
+        since = self._down.get(slot)
+        who = c.name
+        if stale and since is None:
+            self._down[slot] = now
+            self._dropouts += 1
+            last = self._last_frame.get(c.hwnd)
+            if frame is not None:
+                why = (f"the strip decodes but its frame counter is stuck at {frame} for "
+                       f"{now - last[1]:.1f}s" if last else f"frame counter stuck at {frame}")
+                why += " (WoW isn't redrawing it, or the capture returns an old picture)"
+            else:
+                why = self.last_error.get(slot, "no readable frame")
+                if last:
+                    why += f"; last good frame {now - last[1]:.1f}s ago"
+            log.info("bridge: %s unreadable: %s. Capture %s took %.0f ms; %.2fs since the previous read",
+                     who, why, self.last_method.get(slot, "?"), self._capture_ms.get(slot, 0.0), gap)
+        elif not stale and since is not None:
+            del self._down[slot]
+            self._down_total += now - since
+            log.info("bridge: %s readable again after %.1fs", who, now - since)
+
+    def health(self) -> str:
+        """For the health line: reads, worst gap, capture times per slot, dropouts (since the last call)."""
+        names = {c.slot: c.character or c.label or f"slot {c.slot}" for c in self.team.attached()}
+        caps = []
+        for slot, (n, total, worst) in sorted(self._stats.items()):
+            caps.append(f"{names.get(slot, slot)} {self.last_method.get(slot, '?')} "
+                        f"{total / n if n else 0:.0f}/{worst:.0f} ms")
+        now = self._clock()
+        down = self._down_total + sum(now - t for t in self._down.values())
+        text = (f"{self._reads} reads, worst gap {self._worst_gap:.2f}s, capture avg/worst "
+                f"[{', '.join(caps) or 'none'}], {self._dropouts} dropout(s) ({down:.0f}s unreadable)")
+        self._stats.clear()
+        self._reads, self._worst_gap, self._dropouts, self._down_total = 0, 0.0, 0, 0.0
+        self._down = {s: now for s in self._down}
+        return text

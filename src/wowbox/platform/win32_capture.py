@@ -134,6 +134,8 @@ class Win32Capture(CaptureAPI):
         cw, ch = cr.right - cr.left, cr.bottom - cr.top
         if cw <= 0 or ch <= 0:
             raise RuntimeError("window has no client area (minimized?)")
+        # only as big as the region: the window draws clipped to it (a full 1700x1400 frame is ~9 MB per read)
+        cw, ch = min(cw, region.x + region.w), min(ch, region.y + region.h)
         win_dc = w.user32.GetDC(hwnd)
         mem_dc = w.gdi32.CreateCompatibleDC(win_dc)
         bmp = w.gdi32.CreateCompatibleBitmap(win_dc, cw, ch)

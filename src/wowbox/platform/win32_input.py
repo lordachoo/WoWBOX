@@ -16,6 +16,7 @@ log = logging.getLogger(__name__)
 WH_KEYBOARD_LL = 13
 LLKHF_EXTENDED, LLKHF_INJECTED = 0x01, 0x10
 VK_F24 = 0x87
+SLOW_KEY_MS = 100  # a key held up this long by our hook is felt everywhere on the PC
 WATCHDOG_TAG = 0x57424F58  # "WBOX" in dwExtraInfo: our own liveness probe, always swallowed
 
 
@@ -82,6 +83,12 @@ class Win32Input(InputAPI):
         self._probe_seen = threading.Event()
         self._stop = threading.Event()
         self.rehook_count = 0
+        self.on_hook_timeout = lambda: None  # Windows dropped (or nearly dropped) the hook: the diagnostics dump stacks
+        # since the last health() call
+        self._worst_key_ms = 0.0  # longest our hook took over one key
+        self._slow_keys = 0  # keys that took over SLOW_KEY_MS
+        self._worst_probe_ms = 0.0  # longest a probe key took to reach the hook
+        self._reinstalls = 0
 
     # -- sending --------------------------------------------------------
     def post_key(self, hwnd: int, vk: int, down: bool, *, sys_key: bool = False, alt_context: bool = False,
@@ -164,13 +171,20 @@ class Win32Input(InputAPI):
                 if kb.dwExtraInfo == WATCHDOG_TAG:
                     self._probe_seen.set()
                     return 1
+                t0 = time.perf_counter()
                 ev = KeyEvent(
                     vk=kb.vkCode, scan=kb.scanCode,
                     down=w_param in (w.WM_KEYDOWN, w.WM_SYSKEYDOWN),
                     injected=bool(kb.flags & LLKHF_INJECTED), extended=bool(kb.flags & LLKHF_EXTENDED),
                     time_ns=time.perf_counter_ns())
-                if self._callback is not None and self._callback(ev):
-                    return 1
+                try:
+                    if self._callback is not None and self._callback(ev):
+                        return 1
+                finally:
+                    ms = (time.perf_counter() - t0) * 1000
+                    self._worst_key_ms = max(self._worst_key_ms, ms)
+                    if ms > SLOW_KEY_MS:
+                        self._slow_keys += 1
             except Exception:  # never let an exception kill the hook
                 log.exception("keyboard hook callback failed")
         return w.user32.CallNextHookEx(None, n_code, w_param, l_param)
@@ -179,6 +193,23 @@ class Win32Input(InputAPI):
         """Windows silently removes LL hooks that time out. Probe with a tagged F24 and reinstall if unseen."""
         while not self._stop.wait(self._watchdog_interval):
             self._probe_seen.clear()
+            t0 = time.perf_counter()
             self.send_input([(VK_F24, True), (VK_F24, False)], extra=WATCHDOG_TAG)
-            if not self._probe_seen.wait(1.0) and not self._stop.is_set():
+            seen = self._probe_seen.wait(1.0)
+            if seen:
+                self._worst_probe_ms = max(self._worst_probe_ms, (time.perf_counter() - t0) * 1000)
+            elif not self._stop.is_set():
+                self._reinstalls += 1
+                try:
+                    self.on_hook_timeout()
+                except Exception:
+                    log.exception("hook timeout report failed")
                 w.user32.PostThreadMessageW(self._tid, WM_APP_REHOOK, 0, 0)
+
+    def health(self) -> str:
+        """For the health line: how fast key presses got through our hook (since the last call)."""
+        text = (f"worst {self._worst_key_ms:.0f} ms per key, {self._slow_keys} over {SLOW_KEY_MS} ms, "
+                f"probe worst {self._worst_probe_ms:.0f} ms, hook reinstalled {self._reinstalls}x")
+        self._worst_key_ms = self._worst_probe_ms = 0.0
+        self._slow_keys = self._reinstalls = 0
+        return text

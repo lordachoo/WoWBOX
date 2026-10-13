@@ -132,6 +132,10 @@ class InputAPI(ABC):
     @abstractmethod
     def stop_hook(self) -> None: ...
 
+    def health(self) -> str | None:
+        """A short line about how the keyboard hook is doing, for the health log (None: nothing to say)."""
+        return None
+
 
 class CaptureAPI(ABC):
     @abstractmethod

@@ -27,6 +27,7 @@ from .bridge import BridgePoller, ChatEvent, ClientState
 from .bridge import words
 from .config import AppConfig, RouteConfig, load_config
 from .config_text import set_settings, update_team_yaml
+from .diagnostics import Diagnostics
 from .keys import parse_chord
 from .launcher import Launcher
 from .layout import LayoutManager
@@ -37,6 +38,8 @@ from .platform.base import CaptureAPI, InputAPI, WindowAPI
 from .router import ChatGuard, RouteTable, Router
 from .team import Team
 from .ui.overlay import Overlay
+
+UI_TICK_MS = 250  # the UI heartbeat: a late one means the UI thread was busy
 
 log = logging.getLogger(__name__)
 
@@ -64,7 +67,7 @@ class Controller(QObject):
     sig_stack_done = Signal(object)
 
     def __init__(self, cfg_path: Path, cfg: AppConfig, windows: WindowAPI, input_api: InputAPI,
-                 capture_factory: Callable[[], CaptureAPI]) -> None:
+                 capture_factory: Callable[[], CaptureAPI], diag: Diagnostics | None = None) -> None:
         super().__init__()
         self.cfg_path = cfg_path
         self.cfg = cfg
@@ -130,6 +133,42 @@ class Controller(QObject):
         self._auto_timer = QTimer(self, timeout=self._tick,
                                   interval=int(1000 / max(1.0, cfg.automation_options.tick_hz)))
         self._overlay_timer = QTimer(self, timeout=self._update_overlay, interval=300)
+        self._own_diag = diag is None  # tests: watch nothing, start no thread
+        self.diag = diag or Diagnostics(None)
+        self._ui_timer = QTimer(self, timeout=self._ui_tick, interval=UI_TICK_MS)
+        self._ui_last = time.monotonic()
+        self._ui_worst = 0.0
+        self._wire_diagnostics()
+
+    # ------------------------------------------------------------------ diagnostics
+    def _wire_diagnostics(self) -> None:
+        d = self.diag
+        self._ui_beat = d.heartbeat("UI thread", 3.0, "MainThread", active=self._ui_timer.isActive)
+        self.bridge.heartbeat = d.heartbeat("bridge reader", 5.0, "bridge-poller", active=lambda: self.bridge.running)
+        self.router.heartbeat = d.heartbeat("deferred sends", 5.0, "router-defer", active=lambda: self.router.running)
+        d.watch("key sender", 30.0, self._sending_for, "router-sender")
+        if hasattr(self.input, "on_hook_timeout"):
+            self.input.on_hook_timeout = lambda: d.dump_stacks(
+                "the keyboard hook didn't answer within 1s (while it's held up, every key on the PC waits)", "kbd-hook")
+        d.report("UI", self._ui_health)
+        d.report("bridge", lambda: self.bridge.health() if self.bridge.running else "off")
+        d.report("keys", self.input.health)
+        d.report("router", lambda: f"{sum(self.router.waiting().values())} line(s) waiting for you")
+        d.report("activity", lambda: f"{len(self.activity.items())} item(s)")
+
+    def _sending_for(self, now: float) -> float | None:
+        since = self.router.sending_since
+        return None if since is None else now - since
+
+    def _ui_tick(self) -> None:
+        now = time.monotonic()
+        self._ui_worst = max(self._ui_worst, now - self._ui_last - UI_TICK_MS / 1000)
+        self._ui_last = now
+        self._ui_beat()
+
+    def _ui_health(self) -> str:
+        worst, self._ui_worst = self._ui_worst, 0.0
+        return f"worst delay {worst * 1000:.0f} ms"
 
     def _tick(self) -> None:
         now = time.monotonic()
@@ -151,6 +190,13 @@ class Controller(QObject):
         self.memread.start()
         self._refresh_timer.start()
         self._auto_timer.start()
+        self._ui_last = time.monotonic()
+        self._ui_timer.start()
+        if not self._own_diag:
+            self.diag.start()
+            if self.diag.unclean_exit:
+                self.activity.add("app", "diagnostics", f"{self.diag.unclean_exit[0].upper()}"
+                                  f"{self.diag.unclean_exit[1:]}: see wowbox.log", kind="skipped")
         if self.cfg.ui.get("overlay", False):
             self.set_overlay(True)
         log.info("WoWBox ready: %d client(s) attached, %d route chord(s), broadcast %s",
@@ -158,6 +204,8 @@ class Controller(QObject):
 
     def shutdown(self) -> None:
         log.info("shutting down")
+        self.diag.stop()
+        self._ui_timer.stop()
         self._refresh_timer.stop()
         self._auto_timer.stop()
         self.engine.set_enabled(False)
@@ -697,6 +745,7 @@ class Controller(QObject):
     def sync_chat_filter(self) -> None:
         """Write Words.lua from the chat rules (only when they changed what it says)."""
         self._words_checked = time.monotonic()
+        old_version, old_problem = self.words_version, self.words_problem
         if not (self.cfg.bridge.enabled and self.cfg.bridge.chat_filter):
             self.words_version, self.words_problem = None, None
             return
@@ -720,7 +769,8 @@ class Controller(QObject):
                      folder / words.FILE_NAME, version)
             self.activity.add("/bb", "chat filter", f"Words.lua version {version} written: /reload clients to use it",
                               kind="info")
-        self.sig_changed.emit()
+        if changed or (old_version, old_problem) != (self.words_version, self.words_problem):
+            self.sig_changed.emit()
 
     def chat_filter_stale(self) -> list[int]:
         """Clients whose BoxBridge hasn't loaded the current Words.lua (they need a /reload)."""

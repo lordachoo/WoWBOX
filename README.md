@@ -1200,6 +1200,7 @@ packaging/              build.ps1 + PyInstaller entry point
 src/wowbox/
   __main__.py           command line, logging, startup
   app.py                Controller: owns every subsystem, bridges worker threads to the Qt UI
+  diagnostics.py        watchdog (stuck threads -> stacks), crash.log, unclean-exit check, health line
   config.py             team.yaml models (pydantic), load/save
   keys.py               key names, chords, ranges
   team.py               slots, clients, target resolution
@@ -1256,7 +1257,22 @@ They use fake Win32 implementations, so nothing touches real windows.
 | Game blurry or stretched | Set the in-game resolution to the window size (section 15). |
 | Black screen after arranging | D3D device reset. Arrange at character select, or use Restore frames. |
 | Black thumbnails | DWM can't show minimized windows. Don't minimize in main_thumbs. |
-| Logs | `logs\wowbox.log` (rotating). The Log tab shows INFO and up. |
+| WoWBox freezes, or the whole PC lags while it runs | Restart WoWBox, then send `logs\wowbox.log` and `logs\crash.log` (tray menu: *Open logs folder*). Look for *stuck for*, *keyboard hook didn't answer* and *didn't shut down cleanly*: each has the stack of every thread at that moment. See *Diagnostics* below. |
+| Logs | `logs\wowbox.log` (5 MB, 5 old copies kept). The Log tab shows INFO and up. |
+
+### Diagnostics
+
+WoWBox keeps notes so a freeze, crash or slowdown can be explained afterwards. Everything goes to the `logs` folder next to `config` (tray menu: **Open logs folder**):
+
+| What | Where | When |
+|---|---|---|
+| **Stuck loops**: the UI, the bridge reader, the deferred-send loop and the key sender are checked twice a second. One stuck too long (3 s for the UI, 5 s for the bridge and deferred sends, 30 s for one send) gets every thread's stack logged, then a *moving again after N s* line. | `wowbox.log` (WARNING) | As it happens, and again every 30 s while still stuck |
+| **Keyboard hook too slow**: WoWBox's key hook sees every key on the PC, so while it's held up, typing lags everywhere. If a test key doesn't get through within 1 s, every thread's stack is logged before the hook is reinstalled. | `wowbox.log` | As it happens |
+| **Bridge dropouts**: one line when a client becomes unreadable, with why (frame counter stuck, or the decode error), the capture method, how long the capture took, and the time since the previous read. Another line when it's readable again. Paused rules get one line per pause, not one per rule. | `wowbox.log` (INFO) | As it happens |
+| **Health**: uptime, CPU, memory, handles, GDI/USER objects, stalls, the worst UI delay, bridge reads and capture times per client, dropouts, the worst key-hook delay, and the number of errors and warnings logged. WoWBox warns by itself when GDI/USER objects pass 5,000 (Windows stops at 10,000), when handles pass 10,000, or when memory has grown by 1 GB. | `wowbox.log` (*health:*) | Every 5 minutes, and at exit |
+| **Hard crashes, and a fully frozen process**: Python's fault handler writes every thread's stack if WoWBox dies inside a Windows call, or if nothing has run for a minute. | `crash.log` | As it happens |
+| **Unclean exits**: a running WoWBox leaves `wowbox-<pid>.running` in the folder. If one is still there at the next start, that WoWBox crashed, froze and was ended, or Windows closed it. The new one logs that, with whatever `crash.log` holds for it, and the Activity tab shows it. | `wowbox.log` | At the next start |
+| **Errors nobody caught** (in a button handler or a thread) are logged with their traceback instead of vanishing, and so are Qt's own warnings. | `wowbox.log` (CRITICAL / `qt`) | As it happens |
 
 ## 20. Known limits
 
