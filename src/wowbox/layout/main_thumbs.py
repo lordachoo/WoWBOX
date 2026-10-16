@@ -1,4 +1,4 @@
-"""Thumbnail strip: a frameless always-on-top window hosting live DWM thumbnails. Click one to make it main."""
+"""Thumbnail strip: a frameless window, kept above WoW, hosting live DWM thumbnails. Click one to make it main."""
 from __future__ import annotations
 
 import ctypes
@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QWidget
 
 from ..platform.base import Rect
 from .grid import fit_aspect, thumb_cells
+from .zorder import StayWithWoW
 
 log = logging.getLogger(__name__)
 
@@ -43,8 +44,8 @@ def dwm():
 class ThumbStrip(QWidget):
     clicked = Signal(int)
 
-    def __init__(self, label_for: Callable[[int], str]) -> None:
-        super().__init__(None, Qt.FramelessWindowHint | Qt.Tool | Qt.WindowStaysOnTopHint)
+    def __init__(self, label_for: Callable[[int], str], is_wow: Callable[[int], bool] = lambda h: False) -> None:
+        super().__init__(None, Qt.FramelessWindowHint | Qt.Tool)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
         self.setWindowTitle("WoWBox thumbnails")
         self.label_for = label_for
@@ -52,6 +53,7 @@ class ThumbStrip(QWidget):
         self._thumbs: dict[int, int] = {}  # source hwnd -> HTHUMBNAIL
         self._cells: list[tuple[int, Rect]] = []  # (slot, cell in physical px)
         self._size = (0, 0)
+        self._z = StayWithWoW(self, is_wow)
 
     def show_at(self, rect: Rect, entries: list[tuple[int, int]], mover: Callable[[int, Rect], None]) -> None:
         """entries: (slot, hwnd) for the clients to show. rect in physical px."""
@@ -59,6 +61,7 @@ class ThumbStrip(QWidget):
         mover(int(self.winId()), rect)
         self._size = (rect.w, rect.h)
         self._sync(entries)
+        self._z.start()
 
     def _sync(self, entries: list[tuple[int, int]]) -> None:
         wanted = {h for _, h in entries}
@@ -103,6 +106,7 @@ class ThumbStrip(QWidget):
             dwm().DwmUnregisterThumbnail(th)
         self._thumbs.clear()
         self._entries = []
+        self._z.stop()
         self.hide()
 
     def resizeEvent(self, event) -> None:

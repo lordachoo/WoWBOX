@@ -163,3 +163,14 @@ def test_swap_and_assign_by_character():
     assert [m[2] for m in moves] == [1, 3]
     assert r.team.assign_by_character({1: "Tanky", 3: "Healy"}) == []  # already in place
     assert r.team.clients[1].window_title == "WoW1 - Tanky"
+
+
+def test_thumbnails_and_tabs_are_not_always_on_top():
+    """They stay above WoW only: another program in front covers them."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    from wowbox.layout.main_thumbs import ThumbStrip
+    from wowbox.layout.tabs import TabBar
+    for w in (ThumbStrip(str, lambda h: True), TabBar(str, lambda h: True)):
+        assert not w.windowFlags() & Qt.WindowStaysOnTopHint
