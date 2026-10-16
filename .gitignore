@@ -16,3 +16,6 @@ config/automation.yaml
 *.log
 .coverage
 htmlcov/
+
+# personal notes, not part of the project
+docs/hunter-plan.md
