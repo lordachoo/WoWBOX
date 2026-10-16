@@ -123,23 +123,26 @@ local function filterVersion()
   return (tonumber(f.version) or 0) % 64
 end
 
--- does a chat rule want this line? Returns whether it passes and where the text to send starts:
--- a match past the 27 bytes WoWBox sees is sent from the matched word on, so the rule still sees it
+-- does a chat rule want this line? Returns whether it passes and, when one of the filter's words matched,
+-- where it starts, how long it is and its number in the channel's list
 local function wanted(channel, text)
-  if filterVersion() == 0 then return true, 1 end
+  if filterVersion() == 0 then return true end
   local words = BoxBridgeWords.channels[CHANNEL_NAMES[channel] or ""]
-  if words == "all" then return true, 1 end
+  if words == "all" then return true end
   if type(words) ~= "table" then return false end
   local lower = string.lower(text)
-  local at, len
-  for _, w in ipairs(words) do
+  local at, len, index
+  for n, w in ipairs(words) do
     local i = string.find(lower, w, 1, true)
-    if i and (not at or i < at or (i == at and #w > len)) then at, len = i, #w end
+    if i and (not at or i < at or (i == at and #w > len)) then at, len, index = i, #w, n end
   end
   if not at then return false end
-  if at + len - 1 <= MAX_TEXT_BYTES then return true, 1 end
-  return true, at
+  return true, at, len, index
 end
+
+-- a matched word is sent as 2 bytes (KEYWORD, its number in the list) followed by the text after it, so what
+-- follows it (a name, an item) gets all of the 27 bytes WoWBox sees; WoWBox puts the word back
+local KEYWORD = 1
 
 local function priority(ev) return PRIORITY[ev.channel] or 1 end
 
@@ -148,9 +151,13 @@ local function queueChat(channel, sender, text)
   text = plain(text)
   local length = #text
   if channel ~= COMMAND then
-    local ok, at = wanted(channel, text)
+    local ok, at, len, index = wanted(channel, text)
     if not ok then return false, "no chat rule listens for it" end
-    if at > 1 then text = string.sub(text, at) end
+    if index and index < 256 then
+      text = string.sub(text, at + len)
+      length = #text -- what's after the word: WoWBox tells from it whether the line was cut
+      text = string.char(KEYWORD, index) .. text
+    end
   end
   chatSeq = chatSeq % 255 + 1
   local ev = { seq = chatSeq, channel = channel, sender = sender or "", text = text, length = length }

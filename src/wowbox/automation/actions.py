@@ -32,9 +32,11 @@ class MacroStep:
 
 Step = SendStep | TypeStep | WaitStep | MacroStep
 
-PLACEHOLDER = re.compile(r"\{(\w+)\}")
+PLACEHOLDER = re.compile(r"\{(\w+)(?:\|(\w+))?\}")  # {arg}, or {arg|sender}: sender's value when arg is empty
+NAME_VALUES = ("sender", "listener", "name", "arg", "arg2", "who")  # one word: a character name or unit
 _NAME_UNSAFE = re.compile(r"[^\w\-]", re.UNICODE)
 _TEXT_UNSAFE = re.compile(r"[\x00-\x1f\x7f|]")
+_REST_UNSAFE = re.compile(r"[\[\];]")  # {rest} goes into /use etc.: no [conditions] or ; alternatives from chat
 
 
 def safe_values(values: dict[str, str]) -> dict[str, str]:
@@ -42,16 +44,22 @@ def safe_values(values: dict[str, str]) -> dict[str, str]:
     loses control characters and WoW escape codes and can't start a slash command."""
     out = {}
     for k, v in values.items():
-        if k in ("sender", "listener", "name"):
+        if k in NAME_VALUES:
             out[k] = _NAME_UNSAFE.sub("", v)
         else:
-            out[k] = _TEXT_UNSAFE.sub("", v).lstrip(" /")
+            v = _TEXT_UNSAFE.sub("", v)
+            out[k] = (_REST_UNSAFE.sub("", v) if k == "rest" else v).lstrip(" /")
     return out
 
 
 def fill(text: str, values: dict[str, str]) -> str:
-    """Replace {sender}, {message}, ... ; unknown placeholders are left as they are."""
-    return PLACEHOLDER.sub(lambda m: values.get(m.group(1), m.group(0)), text)
+    """Replace {sender}, {message}, {arg|sender}, ... ; unknown placeholders are left as they are."""
+    def one(m: re.Match) -> str:
+        name, fallback = m.group(1), m.group(2)
+        if name not in values and (fallback is None or fallback not in values):
+            return m.group(0)
+        return values.get(name) or (values.get(fallback, "") if fallback else "")
+    return PLACEHOLDER.sub(one, text)
 
 
 def substitute(steps: list[Step], values: dict[str, str]) -> list[Step]:

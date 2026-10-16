@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 import re
 import typing
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from ..config import AutomationRule, ChatChannel
@@ -87,6 +87,35 @@ def lua(f: ChatFilter, version: int) -> str:
             + body(f) + "}\n")
 
 
+_CHANNEL_RE = re.compile(r"^\s*(\w+)\s*=\s*(\{.*?\}|\"(?:\\.|[^\"\\])*\")\s*,\s*$", re.M)
+_STRING_RE = re.compile(r"\"((?:\\.|[^\"\\])*)\"")
+_UNESCAPE = {"n": "\n", "r": "\r"}
+
+
+def parse(text: str) -> ChatFilter | None:
+    """The filter a Words.lua describes (what a client that loaded it has), or None if it isn't one."""
+    if "BoxBridgeWords" not in text or "channels" not in text:
+        return None
+    channels: dict[str, tuple[str, ...] | str] = {}
+    for ch, value in _CHANNEL_RE.findall(text.split("channels", 1)[1]):
+        found = tuple(re.sub(r"\\(.)", lambda m: _UNESCAPE.get(m.group(1), m.group(1)), s)
+                      for s in _STRING_RE.findall(value))
+        channels[ch] = ALL if not value.startswith("{") and found == (ALL,) else found
+    return ChatFilter(channels)
+
+
+def with_keyword(f: ChatFilter | None, ev):
+    """A chat line whose matched word the addon sent as its number (ev.keyword), with the word put back: the
+    text then starts with it. None if `f` (the filter the client loaded) doesn't have that word."""
+    found = f.channels.get(ev.channel) if f else None
+    if not ev.keyword:
+        return ev
+    if not isinstance(found, tuple) or not 1 <= ev.keyword <= len(found):
+        return None
+    word = found[ev.keyword - 1]
+    return replace(ev, text=word + ev.text, length=len(word.encode("utf-8")) + ev.length, keyword=0)
+
+
 def file_version(text: str) -> int:
     m = _VERSION_RE.search(text)
     return int(m.group(1)) if m else 0
@@ -97,14 +126,19 @@ def addon_dir(exe: str) -> Path:
     return Path(exe).parent / "Interface" / "AddOns" / "BoxBridge"
 
 
-def sync(folder: Path, f: ChatFilter) -> tuple[int, bool]:
+def sync(folder: Path, f: ChatFilter, seen: dict[int, ChatFilter] | None = None) -> tuple[int, bool]:
     """Make folder/Words.lua describe `f`. Returns (its version, whether it was rewritten).
-    The version only changes when the channels or words do. Raises OSError if it can't be written."""
+    The version only changes when the channels or words do. Raises OSError if it can't be written.
+    seen: version -> filter, for every version the file has had (clients may still have an older one loaded)."""
     path = folder / FILE_NAME
     old = path.read_text(encoding="utf-8") if path.exists() else ""
     version = file_version(old)
+    seen = {} if seen is None else seen
+    if version and (was := parse(old)) is not None:
+        seen[version] = was  # what a client that loaded it before has
     if version and old == lua(f, version):
         return version, False
     version = version % MAX_VERSION + 1
     path.write_text(lua(f, version), encoding="utf-8", newline="\n")
+    seen[version] = f
     return version, True

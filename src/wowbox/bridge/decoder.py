@@ -59,6 +59,8 @@ CLASS_BYTES = slice(42, 54)
 CHAT_SENDER_BYTES = slice(6, 26)
 CHAT_TEXT_BYTES = slice(26, 53)
 CHAT_INPUT_BYTE = 53
+CHAT_KEYWORD = 1  # first text byte: the next one is the matched word's number in Words.lua, then the text after it
+CHAT_AFTER_WORD = CHAT_TEXT_BYTES.stop - CHAT_TEXT_BYTES.start - 2  # bytes of text after a matched word
 NUM_BYTES = 56
 NUM_BLOCKS = NUM_BYTES // 2
 
@@ -85,6 +87,9 @@ class ChatEvent:
     frame: int = 0
     typing: bool = False  # the client's input flags while the line is shown: the chat frame
     chat_open: bool = False  # replaces state frames for a while, so it carries these itself
+    # 1-based number of the matched word in the channel's Words.lua list, 0 = none. Then `text` is only what came
+    # after the word, and `length` its full length; WoWBox puts the word back (Controller._with_keyword)
+    keyword: int = 0
 
     @property
     def truncated(self) -> bool:
@@ -245,8 +250,11 @@ def _text(raw: bytes) -> str:
 
 
 def _to_chat(d: bytes) -> ChatEvent:
+    raw, keyword = d[CHAT_TEXT_BYTES], 0
+    if raw[0] == CHAT_KEYWORD:
+        raw, keyword = raw[2:], raw[1]
     return ChatEvent(channel=CHAT_CHANNELS.get(d[4], f"channel{d[4]}"), sender=_text(d[CHAT_SENDER_BYTES]),
-                     text=_text(d[CHAT_TEXT_BYTES]), seq=d[3], length=d[5], frame=d[2],
+                     text=_text(raw), seq=d[3], length=d[5], frame=d[2], keyword=keyword,
                      typing=bool(d[CHAT_INPUT_BYTE] & I_TYPING), chat_open=bool(d[CHAT_INPUT_BYTE] & I_CHAT))
 
 
@@ -313,11 +321,15 @@ def encode_bytes(values: dict, frame: int) -> list[int]:
     return data
 
 
-def encode_chat_bytes(channel: str, sender: str, text: str, seq: int, frame: int, input_flags: int = 0) -> list[int]:
-    """Reference encoder for chat frames (mirrors the Lua addon)."""
+def encode_chat_bytes(channel: str, sender: str, text: str, seq: int, frame: int, input_flags: int = 0,
+                      keyword: int = 0) -> list[int]:
+    """Reference encoder for chat frames (mirrors the Lua addon). keyword: `text` is what follows word number
+    `keyword` of the channel's list."""
     code = next(k for k, v in CHAT_CHANNELS.items() if v == channel)
     raw = text.encode("utf-8")
     data = [MAGIC[0], KIND_CHAT, frame % 256, seq % 256, code, min(len(raw), 255)]
+    if keyword:
+        raw = bytes([CHAT_KEYWORD, keyword]) + raw
     data += list(sender.encode("utf-8")[:20].ljust(20, b"\0"))
     data += list(raw[:27].ljust(27, b"\0"))
     data.append(input_flags)

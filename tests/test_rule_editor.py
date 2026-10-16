@@ -128,7 +128,7 @@ def editor(qapp, rule=None, names=()):
     tested = []
     dlg = RuleEditor(None, rule, targets=["all", "Kunth", "Gnope", "class:SHAMAN"],
                      who_choices=["any", "all", "1 (Tinkerdawn)", "3 (Kunth)"], rule_names=list(names),
-                     preview=lambda r: f"preview of {r.name}", on_test=lambda r: tested.append(r) or "tested")
+                     preview=lambda r: f"preview of {r.name}", on_test=lambda r, line="": tested.append(r) or "tested")
     return dlg, tested
 
 

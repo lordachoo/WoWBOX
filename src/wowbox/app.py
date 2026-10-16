@@ -24,6 +24,7 @@ from .rule_store import automation_path, migrate_rules, save_rules
 from .follow import FollowManager
 from .stack import Stacker, StackManager, StackResult, apart
 from .bridge import BridgePoller, ChatEvent, ClientState
+from .bridge.decoder import CHAT_AFTER_WORD
 from .bridge import words
 from .config import AppConfig, RouteConfig, load_config
 from .config_text import set_settings, update_team_yaml
@@ -118,6 +119,7 @@ class Controller(QObject):
         # the chat filter (Words.lua) BoxBridge loads: its version, or None when there isn't one
         self.words_version: int | None = None
         self.words_problem: str | None = None  # why it couldn't be written
+        self.chat_filters: dict[int, words.ChatFilter] = {}  # every Words.lua version seen -> its words
         self._words_checked = 0.0
         self._reload_asked: dict[int, float] = {}  # slot -> when WoWBox last typed /reload for the filter
         self._dropped_seen: dict[int, int] = {}  # slot -> the addon's dropped-lines counter (mod 16) last seen
@@ -414,9 +416,22 @@ class Controller(QObject):
         if ev.channel == "command":
             self.team_command(slot, ev.sender, ev.text)
             return
+        if ev.keyword and (ev := self._with_keyword(slot, ev)) is None:
+            return
         cut = "..." if ev.truncated else ""
         log.info("chat [%s] %s from %s: %s%s", listener, ev.channel, ev.sender, ev.text, cut)
         self.engine.on_chat(slot, ev, time.monotonic(), listener=listener)
+
+    def _with_keyword(self, slot: int, ev: ChatEvent) -> ChatEvent | None:
+        """Put back the word the addon sent as a number (to leave the 27 bytes for what follows it)."""
+        c = self.team.clients.get(slot)
+        version = c.state.chat_filter if c and c.state else 0
+        out = words.with_keyword(self.chat_filters.get(version), ev)
+        if out is None:
+            log.warning("chat [%s] %s from %s: can't tell which word matched (word %d of chat filter version %d, "
+                        "which this WoWBox doesn't know): /reload that client", c.name if c else slot, ev.channel,
+                        ev.sender, ev.keyword, version)
+        return out
 
     # ------------------------------------------------------------------ macros (the editor)
     def macro_hotkey_owner(self, key: str, ignore_macro: str | None = None) -> str | None:
@@ -550,10 +565,13 @@ class Controller(QObject):
             lines.append("Automation is ON and <b>live</b>: a firing really sends the steps.")
         return "<br>".join(lines)
 
-    def test_rule(self, rule: AutomationRule) -> str:
-        """The editor's Test: what one firing would send, without sending anything (also logged)."""
-        from .automation.actions import MacroStep, SendStep, TypeStep, WaitStep, flatten, substitute
+    def test_rule(self, rule: AutomationRule, line: str = "") -> str:
+        """The editor's Test: what one firing would send, without sending anything (also logged).
+        line: the chat line to try it with (chat rules; empty: the first word in Containing)."""
+        from .automation.actions import MacroStep, SendStep, TypeStep, WaitStep, flatten, safe_values, substitute
+        from .automation.engine import _args_used, matched_word
         steps = flatten(rule.do)
+        extra = []
         if rule.chat is not None:
             ch = rule.chat
             first = (ch.sender or ["Someone"])[0]
@@ -561,13 +579,23 @@ class Controller(QObject):
                 slot_cfg = self.cfg.team.slots.get(self.team.leader)
                 first = (self.team.clients[self.team.leader].character or (slot_cfg and slot_cfg.character)
                          or next(iter(sorted(self.character_names())), "Yourleader"))
-            sample = {"sender": first, "message": (ch.contains or ["hello"])[0],
-                      "channel": ch.channel[0], "listener": self.team.clients[self.team.leader].name}
-            steps = substitute(steps, sample)
-            intro = f"Test: a {sample['channel']} from {sample['sender']} saying {sample['message']!r} would do:"
+            channel = ch.channel[0] if ch.channel[0] != "any" else "whisper"
+            ev = ChatEvent(channel=channel, sender=first, text=line.strip() or (ch.contains or ["hello"])[0])
+            values = self.engine.chat_values(ch, ev, self.team.clients[self.team.leader].name)
+            word = matched_word(ch, ev.text) if ch.contains else None
+            if ch.contains and word is None:
+                extra.append(f"(note: {ev.text!r} doesn't contain any of the words, so it wouldn't fire)")
+            if word and len(ev.text[ev.text.lower().find(word) + len(word):].encode("utf-8")) > CHAT_AFTER_WORD:
+                extra.append(f"(note: only {CHAT_AFTER_WORD} bytes after the matched word arrive from the game; "
+                             "the rest would be cut off)")
+            steps = substitute(steps, values)
+            safe = safe_values(values)
+            got = ", ".join(f"{{{k}}} = {safe[k]!r}" for k in _args_used(flatten(rule.do)))
+            intro = f"Test: a {channel} from {first} saying {ev.text!r}" + (f" ({got})" if got else "") + \
+                " would do:"
         else:
             intro = "Test: one firing would do:"
-        out = [intro]
+        out = [intro, *extra]
         names = {c.slot: c.name for c in self.team.clients.values()}
         for st in steps:
             if isinstance(st, WaitStep):
@@ -758,7 +786,7 @@ class Controller(QObject):
             self.words_version, self.words_problem = None, problem
             return
         try:
-            version, changed = words.sync(folder, words.build(self.cfg.automation))
+            version, changed = words.sync(folder, words.build(self.cfg.automation), self.chat_filters)
         except OSError as e:
             if str(e) != self.words_problem:
                 log.warning("chat filter not written: %s", e)
@@ -826,6 +854,19 @@ class Controller(QObject):
         """Your own characters: the ones logged in now, plus those pinned to slots (for chat `sender: team`)."""
         names = {c.character for c in self.team.clients.values() if c.character}
         return names | {s.character for s in self.cfg.team.slots.values() if s.character}
+
+    def who_aliases(self) -> dict[str, str]:
+        """Words {who} understands besides names: each role held by exactly one slot ("tank" -> its character),
+        then team.aliases from team.yaml (which win)."""
+        by_role: dict[str, list[str]] = {}
+        for slot, s in self.cfg.team.slots.items():
+            c = self.team.clients.get(slot)
+            name = (c.character if c else None) or s.character
+            if name:
+                by_role.setdefault(s.role, []).append(name)
+        out = {role: names[0] for role, names in by_role.items() if len(names) == 1}
+        out.update({k.lower(): v for k, v in self.cfg.team.aliases.items()})
+        return out
 
     def slots_for(self, target) -> list[int]:
         return self.team.resolve(target, self.router.active_slot())

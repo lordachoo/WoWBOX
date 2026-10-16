@@ -162,7 +162,7 @@ So WoWBox writes the words and channels of your enabled chat rules into `Words.l
 - **When it's written:** when WoWBox starts, when you save a rule, and on Reload config. Only when the words or channels change.
 - **When a client uses it:** at login or `/reload`. After you change a chat rule's words, type `/bb all reload` when it suits you. Until then, the banner says *Chat filter out of date on …*. To have WoWBox do the `/reload` itself, out of combat, tick *Settings → Chat filter → /reload clients when the word list changes* (`bridge.chat_filter_reload`).
 - **Matching:** the same as the rules: any case, the word anywhere in the line. A rule without words takes every line on its channels. `/bb` commands always pass.
-- **Long lines:** WoWBox sees 27 bytes of each line. When the word comes later in the line, BoxBridge sends the line from that word on, so "sorry to bother you, could I get paladin buff" still works.
+- **Long lines:** WoWBox sees 27 bytes of each line. When a word matches, BoxBridge sends it as a number followed by the 25 bytes after it, wherever it is in the line. So "sorry to bother you, could I get paladin buff" still works, and a name or item after the word isn't crowded out by the word itself (see *Arguments* in section 13).
 - **When it's still too busy:** whispers, party lines and `/bb` commands go ahead of other channels, and a full queue throws away the least important line. Dropped lines show in the Activity tab (*BoxBridge dropped 3 chat lines on Kunth*) and in `/bb words`.
 - **Off:** untick *Settings → Chat filter → Pass on only lines a chat rule could use* (`bridge.chat_filter: false`). A client without `Words.lua`, or with an older BoxBridge, passes every line, as before.
 
@@ -778,11 +778,57 @@ BoxBridge passes every whisper, party, raid, guild, officer, say and yell line i
   - `{listener}`: which of your characters heard it.
 
   `to: "{sender}"` targets the sender's own window, if the sender is one of yours.
-- **Placeholders can't inject commands.** Names keep only letters, digits and `-`. Message text loses control characters and WoW escape codes, and can't start a slash command. Still, use `sender:` to ignore strangers.
+- **Arguments:** what comes after the matched word, so one rule can act on someone or something named in the line (see *Arguments: "heal gno", "disenchant all …"* below):
+
+  | Placeholder | From "heal on gno pls" | From "disenchant all Runecloth Bracers" (word `disenchant all`) |
+  |---|---|---|
+  | `{who}` | `Gnope` (who to act on) | |
+  | `{arg}` | `on` (the first word) | `Runecloth` |
+  | `{arg2}` | `gno` (the second word) | `Bracers` |
+  | `{rest}` | `on gno pls` (all of them) | `Runecloth Bracers` |
+
+  `{x|y}` falls back to `y` when `x` is empty: `[@{arg|sender}]`.
+- **Placeholders can't inject commands.** Names (`{sender}`, `{who}`, `{arg}`, `{arg2}`) keep only letters, digits and `-`. Other text loses control characters and WoW escape codes, and can't start a slash command; `{rest}` also loses `[`, `]` and `;`, so it can't add conditions or alternatives to a `/cast` or `/use`. Still, use `sender:` to ignore strangers.
 - **Heard by several clients.** A party or raid line all your clients hear fires a rule once.
-- **Limits.** The first 27 bytes of each line come through (from the matched word on, if it comes later). Senders get 20 bytes. The addon shows each line for 0.5 s, so a burst of 10 lines takes about 5 s, and status updates pause meanwhile. That's why BoxBridge passes on only lines your rules could match: see *The chat filter* in section 5.
+- **Limits.** 27 bytes of each line come through. When one of the chat filter's words matches, BoxBridge sends the word as a number and then the 25 bytes *after* it, so a name or item name after the word gets the room (needs the current BoxBridge, and WoWBox puts the word back). Without a chat filter, it's the first 27 bytes. Senders get 20 bytes. The addon shows each line for 0.5 s, so a burst of 10 lines takes about 5 s, and status updates pause meanwhile. That's why BoxBridge passes on only lines your rules could match: see *The chat filter* in section 5.
 - **New words need a `/reload`.** A new or changed chat rule's words reach the clients' chat filter on their next `/reload` (`/bb all reload`). The banner tells you when one is out of date.
 - **Testing.** `/bb test Tinkerdawn heal me` in Kunth's client acts like a whisper from Tinkerdawn.
+
+### Arguments: "heal gno", "disenchant all …"
+
+`{who}` works out who "someone" is in a line like "heal &lt;someone&gt;", from the words after the matched one:
+
+1. Filler words are skipped: on, for, to, at, pls, plz, please, now, thx, ty, thanks.
+2. Nothing left, or `me` / `self` / `myself`: the **sender**.
+3. `target`, `focus`, `mouseover`, `pet`, `player`: used as they are, so `[@target]` is the caster's own target.
+4. A **role**: `tank`, `healer` or `dps` mean the character of the only slot with that role in `team.yaml`.
+5. An **alias** from `team.aliases` in `team.yaml` (these win over roles):
+   ```yaml
+   team:
+     aliases: { mt: Tinkerdawn, lock: Gnope }
+   ```
+6. One of your characters' names, or the **start of exactly one**: "gno" is Gnope.
+7. Anything else, as typed: someone else in your group.
+
+```yaml
+  - name: heal-on-request
+    chat: { channel: [whisper, party], sender: team, contains: heal, heard_by: Kunth }
+    do: { type: "/cast [@{who}] Healing Wave", to: Kunth }
+    cooldown: 3s
+    cooldown_per: target      # healing Gnope doesn't hold up a heal on Tinkerdawn
+```
+
+| Line | `{who}` |
+|---|---|
+| "heal", "heal me pls" | the sender |
+| "heal gno", "heal on Gnope" | Gnope |
+| "heal tank" | Tinkerdawn (the slot with role tank) |
+| "heal target" | `target`: Kunth's own target |
+| "heal Bob" | Bob |
+
+- **`cooldown_per: target`** (*Cooldown per target* in the editor) keeps the cooldown separately for each `{who}`. A request for someone still on cooldown waits in the queue; requests for others go first.
+- **Item names:** `{rest}` is everything after the word: `/use {rest}`. 25 bytes of it arrive, so very long names are cut; the log and the editor's Test say so.
+- **Test it in the editor:** type a line in *Test line* (e.g. `heal on gno pls`) and press *Test*: it shows what `{who}` and the others became and the exact line it would type, without sending anything. The log also says what a firing understood, e.g. `whisper from Kunth: 'heal on gno' -> {who}='Gnope'`.
 
 ### Recipe: heal and buff bot on whisper
 

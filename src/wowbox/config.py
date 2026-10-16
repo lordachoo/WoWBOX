@@ -84,6 +84,9 @@ class SlotConfig(_Model):
 class TeamConfig(_Model):
     leader: int = 1
     slots: dict[int, SlotConfig] = Field(default_factory=lambda: {1: SlotConfig(label="Main", role="tank")})
+    # extra words {who} understands in chat rules ("heal mt" -> Tinkerdawn). Roles work without this:
+    # "tank" / "healer" / "dps" mean the character of the only slot with that role.
+    aliases: dict[str, str] = {}
 
     @model_validator(mode="after")
     def _leader_in_slots(self) -> "TeamConfig":
@@ -246,10 +249,14 @@ class AutomationRule(_Model):
     cooldown: Duration = 0.0
     queue: int | None = Field(default=None, ge=0, le=50)  # chat rules: requests kept while busy (None: the default)
     priority: int = Field(default=0, ge=-100, le=100)  # waiting for the same character: higher goes first
+    # chat rules: "target" keeps the cooldown per {who}, so healing Gnope doesn't hold up a heal on Kunth
+    cooldown_per: Literal["rule", "target"] = "rule"
 
     @model_validator(mode="after")
     def _trigger(self) -> "AutomationRule":
         triggers = [t for t in ("when", "every", "chat") if getattr(self, t) is not None]
+        if self.cooldown_per == "target" and self.chat is None:
+            raise ValueError(f"rule {self.name!r}: cooldown per target needs a chat trigger (it's per {{who}})")
         if triggers == ["when", "chat"]:  # chat line plus an extra state condition
             return self
         if len(triggers) != 1:

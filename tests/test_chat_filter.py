@@ -89,8 +89,9 @@ def _fire(g, event, *args):
         f.scripts["OnEvent"](f, event, *args)
 
 
-def _lines(g, until=20.0):
-    """Every chat line the addon shows, in order, stepping its clock."""
+def _lines(g, until=20.0, f=None):
+    """Every chat line the addon shows, in order, stepping its clock. f: the filter it loaded, to put the matched
+    word back the way WoWBox does."""
     out, t = [], 0.0
     while t < until:
         g.now = t
@@ -98,7 +99,7 @@ def _lines(g, until=20.0):
         if isinstance(x, ChatEvent) and (not out or out[-1].seq != x.seq):
             out.append(x)
         t += 0.1
-    return out
+    return [words.with_keyword(f, e) for e in out] if f else out
 
 
 def test_addon_without_words_passes_everything_and_reports_version_0():
@@ -109,7 +110,8 @@ def test_addon_without_words_passes_everything_and_reports_version_0():
 
 
 def test_addon_filters_by_channel_and_word():
-    g = _load(words.lua(words.build(RULES[:2]), 9))
+    f = words.build(RULES[:2])
+    g = _load(words.lua(f, 9))
     st = _draw(g)
     assert isinstance(st, ClientState) and st.chat_filter == 9
     _fire(g, "CHAT_MSG_RAID", "heal me", "Raider")  # raid isn't listened to
@@ -117,15 +119,46 @@ def test_addon_filters_by_channel_and_word():
     _fire(g, "CHAT_MSG_WHISPER", "|cffff0000HEAL|r pls", "Gnope")
     _fire(g, "CHAT_MSG_PARTY", "need a light heal", "Kunth")
     _fire(g, "CHAT_MSG_RAID", "spam", "Raider")
-    assert [(e.channel, e.text) for e in _lines(g)] == [("whisper", "HEAL pls"), ("party", "need a light heal")]
+    assert [(e.channel, e.text) for e in _lines(g, f=f)] == [("whisper", "heal pls"), ("party", "light heal")]
 
 
 def test_addon_sends_a_late_match_from_the_matched_word():
-    g = _load(words.lua(words.build(RULES), 1))
+    f = words.build(RULES)
+    g = _load(words.lua(f, 1))
     text = "hey guys sorry to bother but could I get paladin buff thanks"
     _fire(g, "CHAT_MSG_PARTY", text, "Gnope")
-    (ev,) = _lines(g)
-    assert ev.text.startswith("paladin buff") and ev.truncated and ev.length == len(text)
+    (ev,) = _lines(g, f=f)
+    assert ev.text == "paladin buff thanks" and not ev.truncated
+
+
+def test_addon_sends_the_word_as_a_number_so_what_follows_it_fits():
+    rules = [rule("de", "party", ["disenchant all"]), rule("heal", "party", ["heal"])]
+    f = words.build(rules)
+    g = _load(words.lua(f, 3))
+    _fire(g, "CHAT_MSG_PARTY", "pls disenchant all Runecloth Bracers of the Eagle", "Gnope")
+    (raw,) = _lines(g)
+    assert raw.keyword == f.channels["party"].index("disenchant all") + 1
+    assert raw.text == " Runecloth Bracers of the" and raw.truncated  # 25 bytes after the word, not 12
+    ev = words.with_keyword(f, raw)
+    assert ev.text == "disenchant all Runecloth Bracers of the" and ev.truncated and ev.keyword == 0
+    assert words.with_keyword(words.build([]), raw) is None  # a list without that word: can't tell which it was
+
+
+def test_words_lua_reads_back():
+    f = words.build(RULES)
+    assert words.parse(words.lua(f, 7)) == f
+    assert words.parse("-- placeholder\n") is None
+
+
+def test_sync_remembers_every_version(tmp_path):
+    seen = {}
+    a, b = words.build(RULES[:1]), words.build(RULES)
+    words.sync(tmp_path, a, seen)
+    words.sync(tmp_path, b, seen)
+    assert seen == {1: a, 2: b}
+    later = {}  # a WoWBox started after that: it still learns the version in the file
+    words.sync(tmp_path, b, later)
+    assert later == {2: b}
 
 
 def test_addon_whispers_jump_the_queue_and_raid_spam_is_dropped_first():
@@ -211,3 +244,41 @@ def test_controller_without_the_addon_folder_says_so(controller, tmp_path):
     c.cfg.bridge.addon_dir = str(tmp_path / "nope")
     c.sync_chat_filter()
     assert c.words_version is None and "isn't installed" in c.words_problem
+
+
+def test_controller_puts_the_word_back_before_the_rules_see_it(controller):
+    c, game = controller
+    c.cfg.automation = [rule("de", "party", ["disenchant all"]), rule("heal", "party", ["heal"])]
+    c.sync_chat_filter()
+    f = words.build(c.cfg.automation)
+    c.team.clients[1].state = ClientState(name="A", chat_filter=c.words_version)
+    seen = []
+    c.engine.on_chat = lambda slot, ev, now, listener="": seen.append(ev.text)
+    raw = ChatEvent("party", "Gnope", " Runecloth Bracers", keyword=f.channels["party"].index("disenchant all") + 1,
+                    length=18)
+    c._on_chat(1, raw)
+    assert seen == ["disenchant all Runecloth Bracers"]
+    c.team.clients[1].state = ClientState(name="A", chat_filter=40)  # a list this WoWBox never wrote
+    c._on_chat(1, raw)
+    assert len(seen) == 1  # dropped (and logged), not guessed
+
+
+def test_controller_roles_and_aliases_for_who(controller):
+    c, _ = controller
+    for slot, (role, name) in {1: ("tank", "Tinkerdawn"), 2: ("dps", "Gnope"), 3: ("healer", "Kunth"),
+                               4: ("dps", "Other")}.items():
+        c.cfg.team.slots[slot].role, c.cfg.team.slots[slot].character = role, name
+    c.cfg.team.aliases = {"MT": "Tinkerdawn"}
+    a = c.who_aliases()
+    assert a["tank"] == "Tinkerdawn" and a["healer"] == "Kunth" and a["mt"] == "Tinkerdawn"
+    assert "dps" not in a  # two slots are dps: it doesn't say which
+
+
+def test_editor_test_tries_a_sample_line(controller):
+    c, _ = controller
+    r = AutomationRule.model_validate({"name": "h", "chat": {"channel": "party", "sender": "Kunth", "contains": "heal"},
+                                       "do": {"type": "/cast [@{who}] Healing Wave", "to": 2}})
+    out = c.test_rule(r, "heal on me pls")
+    assert "{who} = 'Kunth'" in out and "/cast [@Kunth] Healing Wave" in out
+    assert "wouldn" in c.test_rule(r, "hello there")
+    assert "cut off" in c.test_rule(r, "heal " + "x" * 40)

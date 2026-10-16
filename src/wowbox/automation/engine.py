@@ -15,7 +15,7 @@ from typing import Callable, Protocol
 from ..bridge.decoder import STATE_FIELDS, ChatEvent, ClientState
 from ..config import SENDER_TEAM, AutomationOptions, AutomationRule, ChatTrigger, Condition, Target
 from ..keys import Chord
-from .actions import MacroStep, SendStep, Step, TypeStep, WaitStep, describe, flatten, substitute
+from .actions import MacroStep, SendStep, Step, TypeStep, WaitStep, describe, flatten, safe_values, substitute
 
 log = logging.getLogger(__name__)
 
@@ -41,6 +41,15 @@ class StateSource(Protocol):
     def missing_windows(self) -> list[int]: ...
 
     def slots_for(self, target: Target) -> list[int]: ...
+
+
+ARG_VALUES = ("who", "arg", "arg2", "rest")  # from the end of a chat line: a cut can lose them
+
+
+def _args_used(steps: list[Step]) -> list[str]:
+    """Which of {who} {arg} {arg2} {rest} the steps use (also as {x|y})."""
+    text = describe(steps)
+    return [k for k in ARG_VALUES if re.search(r"\{" + k + r"[}|]", text)]
 
 
 def _rules(names: list[str]) -> str:
@@ -112,6 +121,53 @@ def matched_word(trig: ChatTrigger, text: str) -> str | None:
     return max(hits, key=len) if hits else None
 
 
+FILLER_WORDS = {"on", "for", "to", "at", "pls", "plz", "please", "now", "thx", "ty", "thanks"}
+SELF_WORDS = {"me", "self", "myself", "i"}
+UNIT_WORDS = {"target", "focus", "mouseover", "pet", "player", "targettarget"}  # WoW's own words, used as they are
+
+
+def after_word(text: str, word: str | None) -> str:
+    """The text after the matched word ("heal on gno pls", "heal" -> "on gno pls"). A word matched inside a longer
+    one ("heal" in "healing") counts from the end of that one. No word: the whole line."""
+    if not word:
+        return text.strip()
+    at = text.lower().find(word)
+    if at < 0:
+        return ""
+    rest = text[at + len(word):]
+    if rest and not rest[0].isspace():  # in the middle of a word: skip the rest of it
+        rest = rest.split(None, 1)[1] if len(rest.split(None, 1)) > 1 else ""
+    return rest.strip()
+
+
+def chat_args(text: str, word: str | None) -> dict[str, str]:
+    """{arg} {arg2} {rest}: the words after the matched word."""
+    rest = after_word(text, word)
+    parts = rest.split()
+    return {"rest": rest, "arg": parts[0] if parts else "", "arg2": parts[1] if len(parts) > 1 else ""}
+
+
+def resolve_who(rest: str, sender: str, names: set[str], aliases: dict[str, str]) -> str:
+    """{who}: who "someone" is in "heal <someone>". Filler words are skipped; nothing, or me/self, is the sender;
+    target/focus/... stay as they are; then an alias (or role) from team.yaml; then the start of exactly one of
+    your characters' names; otherwise the word as typed (someone else in the group)."""
+    words = [w.strip(".,!?") for w in rest.split()]
+    words = [w for w in words if w and w.lower() not in FILLER_WORDS]
+    if not words or words[0].lower() in SELF_WORDS:
+        return sender
+    w = words[0]
+    low = w.lower()
+    if low in UNIT_WORDS:
+        return low
+    if low in aliases:
+        return aliases[low]
+    exact = [n for n in names if n.lower() == low]
+    if exact:
+        return exact[0]
+    starts = [n for n in names if n.lower().startswith(low)]
+    return starts[0] if len(starts) == 1 else w
+
+
 def fmt_left(seconds: float) -> str:
     """12 -> '12s', 725 -> '12m 05s', 3725 -> '1h 02m'"""
     s = max(0, int(round(seconds)))
@@ -158,6 +214,7 @@ class _Request:
     steps: list[Step]
     why: str
     queued_at: float
+    target: str = ""  # {who}, lower case: cooldown_per target
 
 
 @dataclass
@@ -176,6 +233,18 @@ class RuleRuntime:
     last_sender: str | None = None  # whose request the last run was for: cooldown still stops their repeats
     wait_reason: str = ""  # why the current step is waiting, for the Status column
     cast_wait_since: float | None = None  # when the current step started waiting for someone's cast
+    target_fired: dict[str, float] = field(default_factory=dict)  # cooldown_per target: {who} -> last firing
+    current_target: str = ""  # cooldown_per target: who the current run is for
+
+    def cooling(self, now: float, target: str = "") -> float:
+        """Seconds of cooldown left (for that target, with cooldown_per target)."""
+        r = self.rule
+        last = self.target_fired.get(target) if r.cooldown_per == "target" else self.last_fired
+        return r.cooldown - (now - last) if last is not None and r.cooldown else 0.0
+
+    def cooling_targets(self, now: float) -> list[tuple[str, float]]:
+        return [(t, self.rule.cooldown - (now - at)) for t, at in self.target_fired.items()
+                if now - at < self.rule.cooldown]
 
     @property
     def enabled(self) -> bool:
@@ -234,7 +303,9 @@ class AutomationEngine:
             waiting = f" · waiting: {rt.wait_reason}" if rt.wait_reason else ""
             nxt = f"next: {rt.pending[0].sender}" if rt.pending else ""
             return RuleStatus(f"running step {rt.running_step}/{len(steps)}{who}{waiting}{queued}", nxt, None, last)
-        cooling = r.cooldown - (now - rt.last_fired) if rt.last_fired is not None and r.cooldown else 0.0
+        cooling = rt.cooling(now) if r.cooldown_per == "rule" else 0.0
+        per_target = ", ".join(f"{t} {fmt_left(left)}" for t, left in rt.cooling_targets(now)) \
+            if r.cooldown_per == "target" else ""
         if not self.enabled:
             state = "automation OFF"
         elif why := self.blocked_reason(rt):
@@ -243,6 +314,8 @@ class AutomationEngine:
             state = f"cooldown {fmt_left(cooling)}"
         else:
             state = "waiting"
+        if per_target:
+            state += f" · cooldown for {per_target}"
         state += queued
         ready = False
         progress = None
@@ -473,7 +546,7 @@ class AutomationEngine:
         if not candidates:
             return
         self._chat_seen = {k: t for k, t in self._chat_seen.items() if now - t < CHAT_DEDUPE}
-        values = {"sender": ev.sender, "message": ev.text, "channel": ev.channel, "listener": listener}
+        base = {"sender": ev.sender, "message": ev.text, "channel": ev.channel, "listener": listener}
         stale = self.stale_slots()
         for rt in candidates:
             if why := self.blocked_reason(rt, stale):
@@ -483,19 +556,39 @@ class AutomationEngine:
             if key in self._chat_seen:
                 continue
             self._chat_seen[key] = now
+            values = self.chat_values(rt.rule.chat, ev, listener, base)
+            safe = safe_values(values)
+            target = safe["who"].lower()
             steps, why = substitute(rt.steps, values), f"{ev.channel} from {ev.sender}: {ev.text!r}"
+            if used := _args_used(rt.steps):
+                why += " -> " + ", ".join(f"{{{k}}}={safe[k]!r}" for k in used)
+                if ev.truncated:
+                    why += " (the line was cut off: only its start arrived)"
             busy = ("still running" if rt.running_step is not None else
-                    "on cooldown" if rt.last_fired is not None and now - rt.last_fired < rt.rule.cooldown else
+                    "on cooldown" if rt.cooling(now, target) > 0 else
                     "others are queued first" if rt.pending else None)
             if busy:
-                self._queue(rt, _Request(ev.sender, steps, why, now), busy)
+                self._queue(rt, _Request(ev.sender, steps, why, now, target), busy)
                 continue
             if rt.rule.when is not None:
                 ok, _, matched = self._check(rt, self.source.states())
                 if not ok:
                     continue
                 steps = substitute(steps, matched) if matched else steps
-            self._fire(rt, now, steps, why, ev.sender)
+            self._fire(rt, now, steps, why, ev.sender, target)
+
+    def chat_values(self, trig: ChatTrigger, ev: ChatEvent, listener: str = "",
+                    base: dict[str, str] | None = None) -> dict[str, str]:
+        """The placeholders a chat line fills in: {sender} {message} {channel} {listener} {arg} {arg2} {rest}
+        {who}."""
+        values = dict(base) if base else {"sender": ev.sender, "message": ev.text, "channel": ev.channel,
+                                          "listener": listener}
+        args = chat_args(ev.text, matched_word(trig, ev.text) if trig.contains else None)
+        names = getattr(self.source, "character_names", None)
+        aliases = getattr(self.source, "who_aliases", None)
+        values.update(args, who=resolve_who(args["rest"], ev.sender, set(names()) if names else set(),
+                                            aliases() if aliases else {}))
+        return values
 
     # ------------------------------------------------------------------ chat request queue
     def queue_limit(self, rt: RuleRuntime) -> int:
@@ -507,7 +600,12 @@ class AutomationEngine:
                 any(q.sender.lower() == who for q in rt.pending):
             self._event(f"rule {name!r}: {req.sender} is already being served or queued, skipped")
             return
-        if busy == "on cooldown" and who == (rt.last_sender or "").lower():
+        if busy == "on cooldown" and rt.rule.cooldown_per == "target":
+            if req.target == rt.current_target and who == (rt.last_sender or "").lower():
+                self._event(f"rule {name!r}: on cooldown for {req.target}, chat from {req.sender} skipped "
+                            "(just served)")
+                return
+        elif busy == "on cooldown" and who == (rt.last_sender or "").lower():
             self._event(f"rule {name!r}: on cooldown, chat from {req.sender} skipped (they were just served)")
             return
         limit = self.queue_limit(rt)
@@ -521,12 +619,19 @@ class AutomationEngine:
         self._event(f"rule {name!r}: {busy}, {req.sender} queued (#{len(rt.pending)})")
 
     def _next_request(self, rt: RuleRuntime, now: float, states: dict[int, ClientState | None]) -> None:
-        """Serve the next queued chat request once the rule is free and off cooldown."""
-        if rt.last_fired is not None and now - rt.last_fired < rt.rule.cooldown:
+        """Serve the next queued chat request once the rule is free and off cooldown (cooldown_per target: the
+        first one whose target is off cooldown)."""
+        per_target = rt.rule.cooldown_per == "target"
+        if not per_target and rt.cooling(now) > 0:
             return
+        ttl = self.options.chat_queue_ttl
         while rt.pending:
-            req = rt.pending.popleft()
-            if now - req.queued_at > self.options.chat_queue_ttl:
+            req = next((q for q in rt.pending if not per_target or now - q.queued_at > ttl
+                        or rt.cooling(now, q.target) <= 0), None)
+            if req is None:
+                return
+            rt.pending.remove(req)
+            if now - req.queued_at > ttl:
                 self._event(f"rule {rt.rule.name!r}: {req.sender}'s request expired after "
                             f"{fmt_left(self.options.chat_queue_ttl)} in the queue")
                 continue
@@ -537,7 +642,7 @@ class AutomationEngine:
                     self._event(f"rule {rt.rule.name!r}: {req.sender}'s request dropped, the condition is false now")
                     continue
                 steps = substitute(steps, matched) if matched else steps
-            self._fire(rt, now, steps, f"queued {fmt_left(now - req.queued_at)}, {req.why}", req.sender)
+            self._fire(rt, now, steps, f"queued {fmt_left(now - req.queued_at)}, {req.why}", req.sender, req.target)
             return
 
     def _sender_ok(self, allowed: list[str], sender: str) -> bool:
@@ -570,8 +675,12 @@ class AutomationEngine:
 
     # ------------------------------------------------------------------ running
     def _fire(self, rt: RuleRuntime, now: float, steps: list[Step] | None = None, why: str = "",
-              sender: str | None = None) -> None:
+              sender: str | None = None, target: str = "") -> None:
         rt.last_fired = now
+        rt.current_target = target
+        if rt.rule.cooldown_per == "target":
+            rt.target_fired = {t: at for t, at in rt.target_fired.items() if now - at < rt.rule.cooldown}
+            rt.target_fired[target] = now
         rt.fire_count += 1
         rt.run_steps = steps
         rt.current_sender = sender

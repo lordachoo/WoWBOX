@@ -532,3 +532,100 @@ def test_poller_warns_when_reads_fall_behind(caplog):
     t[0] = 4.0
     poller.poll_once(cap)
     assert "between reads" not in caplog.text  # once a minute, not every read
+
+
+# ---------------------------------------------------------------- arguments: {arg} {arg2} {rest} {who}
+from wowbox.automation.actions import fill  # noqa: E402
+from wowbox.automation.engine import chat_args, resolve_who  # noqa: E402
+
+NAMES = {"Tinkerdawn", "Gnope", "Kunth", "Gnomeo"}
+ALIASES = {"tank": "Tinkerdawn", "mt": "Tinkerdawn"}
+
+
+@pytest.mark.parametrize("text,word,arg,arg2,rest", [
+    ("heal Gnope", "heal", "Gnope", "", "Gnope"),
+    ("pls light heal kunth now", "light heal", "kunth", "now", "kunth now"),
+    ("heal", "heal", "", "", ""),
+    ("healing kunth", "heal", "kunth", "", "kunth"),  # matched inside a longer word
+    ("disenchant all Runecloth Bracers", "disenchant all", "Runecloth", "Bracers", "Runecloth Bracers"),
+    ("anything goes", None, "anything", "goes", "anything goes"),  # a rule without words: the whole line
+])
+def test_chat_args(text, word, arg, arg2, rest):
+    assert chat_args(text, word) == {"arg": arg, "arg2": arg2, "rest": rest}
+
+
+@pytest.mark.parametrize("rest,who", [
+    ("", "Bob"), ("me pls", "Bob"), ("on me", "Bob"), ("self", "Bob"),
+    ("gnope", "Gnope"), ("on gnop pls", "Gnope"), ("Kun", "Kunth"),
+    ("gno", "gno"),            # Gnope and Gnomeo both start with it: used as typed
+    ("tank", "Tinkerdawn"), ("MT", "Tinkerdawn"),
+    ("target", "target"), ("on Focus", "focus"),
+    ("Randompug", "Randompug"),
+])
+def test_who(rest, who):
+    assert resolve_who(rest, "Bob", NAMES, ALIASES) == who
+
+
+def test_fallback_placeholders():
+    v = {"arg": "", "sender": "Bob", "who": "Gnope"}
+    assert fill("/cast [@{arg|sender}] X", v) == "/cast [@Bob] X"
+    assert fill("/cast [@{who|sender}] X", v) == "/cast [@Gnope] X"
+    assert fill("{arg}.", v) == "."  # known but empty
+    assert fill("{name|slot} {health}", v) == "{name|slot} {health}"  # not chat values: left for later
+
+
+def test_argument_values_cannot_inject_commands():
+    steps = [TypeStep("/cast [@{who}] Heal", "Kunth"), TypeStep("/use {rest}", "Kunth")]
+    out = substitute(steps, {"who": "Gnope]/run X", "rest": "Bracers; /run X() [@target]"})
+    assert out[0].text == "/cast [@GnoperunX] Heal"
+    assert out[1].text == "/use Bracers /run X() @target"  # no ; alternatives or [conditions]
+
+
+class ArgSource(Source):
+    def character_names(self):
+        return {"Tinkerdawn", "Gnope", "Kunth"}
+
+    def who_aliases(self):
+        return {"tank": "Tinkerdawn"}
+
+
+def arg_engine(rules, **opts):
+    cfg = AppConfig.model_validate({"automation": rules, "automation_options": {
+        "enabled_on_start": True, "dry_run": False, "pause_on_stale_bridge": False, **opts}})
+    sender = Sender()
+    e = AutomationEngine(cfg.automation, cfg.automation_options, sender, ArgSource())
+    events = []
+    e.on_event = events.append
+    return e, sender, events
+
+
+HEAL_WHO = {"name": "heal", "chat": {"channel": ["whisper", "party"], "sender": "team", "contains": "heal",
+                                     "heard_by": "Kunth"},
+            "do": {"type": "/cast [@{who}] Healing Wave", "to": "Kunth"}, "cooldown": "3s"}
+
+
+def test_chat_rule_heals_who_was_named():
+    e, sender, events = arg_engine([HEAL_WHO])
+    e.on_chat(3, whisper(sender="Gnope", text="heal on tank pls"), now=0)
+    e.tick(0)
+    assert sender.sent == [("type", "/cast [@Tinkerdawn] Healing Wave", "Kunth")]
+    assert any("{who}='Tinkerdawn'" in m for m in events)  # the log says what it understood
+
+
+def test_cooldown_per_target():
+    e, sender, events = arg_engine([{**HEAL_WHO, "cooldown_per": "target"}])
+    e.on_chat(3, whisper(sender="Gnope", text="heal"), now=0)          # Gnope
+    e.on_chat(3, whisper(sender="Tinkerdawn", text="heal me"), now=1)  # Tinkerdawn: another target, not held up
+    e.on_chat(3, whisper(sender="Kunth", text="heal gnope"), now=1.5)  # Gnope again: waits for Gnope's cooldown
+    for t in (1, 1.5, 2, 2.9):
+        e.tick(t)
+    assert [t for _, t, _ in sender.sent] == ["/cast [@Gnope] Healing Wave", "/cast [@Tinkerdawn] Healing Wave"]
+    assert "cooldown for gnope" in e.status(e.rules[0], 2.0).state
+    e.tick(3.0)
+    assert sender.sent[-1][1] == "/cast [@Gnope] Healing Wave"
+
+
+def test_cooldown_per_target_needs_a_chat_rule():
+    with pytest.raises(ValueError, match="cooldown per target needs a chat trigger"):
+        AppConfig.model_validate({"automation": [{"name": "x", "every": "5s", "cooldown_per": "target",
+                                                  "do": {"send": "1"}}]})

@@ -49,8 +49,11 @@ OP_SUFFIX = dict(OPS)
 TRIGGERS = [("state", "State: when a condition is true"), ("every", "Timer: every so often"),
             ("chat", "Chat: when a chat line comes in"), ("chat+state", "Chat + state: a chat line, if a condition is true")]
 CHANNELS = list(CHAT_CHANNELS) + ["any"]
-PLACEHOLDER_HINT = ("In chat rules, {sender}, {message}, {channel} and {listener} are filled in, "
-                    "e.g. /cast [@{sender}] Healing Wave.")
+PLACEHOLDER_HINT = ("In chat rules, {sender}, {message}, {channel} and {listener} are filled in, and from the words "
+                    "after the matched one: {who} (who to act on: \"heal gno\" -> Gnope, \"heal\" or \"heal me\" "
+                    "-> the sender, \"heal tank\" -> your tank), {arg} and {arg2} (the first and second word) and "
+                    "{rest} (all of them, e.g. an item name). {arg|sender}: the sender when there's no word. "
+                    "E.g. /cast [@{who}] Healing Wave, or /use {rest}.")
 
 
 def split_key(key: str) -> tuple[str, str]:
@@ -113,7 +116,7 @@ def split_list(text: str) -> list[str] | None:
 def build_rule(name: str, enabled: bool, cooldown: str, trigger: str, *, who: str = "any",
                conditions: list[dict] | None = None, every: str = "", channels: list[str] | None = None,
                senders: str = "", contains: str = "", heard_by: str = "all", queue: str = "",
-               priority: int = 0, steps: list[dict]) -> AutomationRule:
+               priority: int = 0, cooldown_per_target: bool = False, steps: list[dict]) -> AutomationRule:
     """Editor values -> AutomationRule. Raises ValueError with a readable message."""
     if not name.strip():
         raise ValueError("Give the rule a name.")
@@ -149,6 +152,8 @@ def build_rule(name: str, enabled: bool, cooldown: str, trigger: str, *, who: st
         if c := split_list(contains):
             chat["contains"] = c
         data["chat"] = chat
+        if cooldown_per_target:
+            data["cooldown_per"] = "target"
         if (q := queue.strip().lower()) not in ("", "default"):
             if q == "off":
                 q = "0"
@@ -249,7 +254,7 @@ class ConditionTable(QWidget):
 class RuleEditor(QDialog):
     def __init__(self, parent: QWidget | None, rule: AutomationRule | None, *, targets: list[str],
                  who_choices: list[str], rule_names: list[str],
-                 preview: Callable[[AutomationRule], str], on_test: Callable[[AutomationRule], str]) -> None:
+                 preview: Callable[[AutomationRule], str], on_test: Callable[[AutomationRule, str], str]) -> None:
         super().__init__(parent)
         self.setWindowTitle(f"Edit rule: {rule.name}" if rule else "New automation rule")
         self.resize(940, 720)
@@ -340,6 +345,15 @@ class RuleEditor(QDialog):
         self.queue.setToolTip("Requests that come in while this rule is busy wait their turn, one per person. "
                               "default: automation_options.chat_queue (5). off: they're skipped.")
         cl.addRow("Queue while busy", self.queue)
+        self.per_target = QCheckBox("Cooldown per target: healing Gnope doesn't hold up a heal on Kunth")
+        self.per_target.setChecked(bool(rule and rule.cooldown_per == "target"))
+        self.per_target.setToolTip("The cooldown is kept separately for each {who}. Without it, one cooldown for "
+                                   "the whole rule.")
+        cl.addRow("", self.per_target)
+        self.sample = QLineEdit()
+        self.sample.setPlaceholderText("a chat line for Test, e.g. heal on gno pls (empty: the first word in "
+                                       "Containing)")
+        cl.addRow("Test line", self.sample)
 
         # steps
         self.steps = StepTable(targets, macro_rows(rule) if rule else None)
@@ -403,7 +417,8 @@ class RuleEditor(QDialog):
             who=self.who.currentText(), conditions=self.conditions.read(), every=self.every.text(),
             channels=[ch for ch, cb in self.channel_boxes.items() if cb.isChecked()],
             senders=self.senders.text(), contains=self.contains.text(), heard_by=self.heard_by.currentText(),
-            queue=self.queue.currentText(), priority=self.priority.value(), steps=self.steps.read())
+            queue=self.queue.currentText(), priority=self.priority.value(),
+            cooldown_per_target=self.per_target.isChecked(), steps=self.steps.read())
         if rule.name in self.other_names:
             raise ValueError(f"There's already a rule called {rule.name!r}.")
         return rule
@@ -415,7 +430,8 @@ class RuleEditor(QDialog):
                 who=self.who.currentText(), conditions=self.conditions.read(), every=self.every.text(),
                 channels=[ch for ch, cb in self.channel_boxes.items() if cb.isChecked()],
                 senders=self.senders.text(), contains=self.contains.text(),
-                heard_by=self.heard_by.currentText(), queue=self.queue.currentText(), priority=self.priority.value(), steps=self.steps.read())
+                heard_by=self.heard_by.currentText(), queue=self.queue.currentText(), priority=self.priority.value(),
+            cooldown_per_target=self.per_target.isChecked(), steps=self.steps.read())
         except ValueError as e:
             self.check.setText(f"<span style='color:gray'>Not complete yet: {e}</span>")
             return
@@ -428,7 +444,7 @@ class RuleEditor(QDialog):
             self.error.setText(str(e))
             return
         self.error.setText("")
-        self.test_out.setText(self.on_test(rule))
+        self.test_out.setText(self.on_test(rule, self.sample.text()))
 
     def save(self) -> None:
         try:

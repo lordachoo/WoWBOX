@@ -20,6 +20,9 @@ team:
     2: { label: "Shammy1",  role: dps }
     3: { label: "Shammy2",  role: healer }
     4: { label: "Mage",     role: dps }
+  # extra words {who} understands in chat rules ("heal mt" -> that character). Roles already work:
+  # "tank" / "healer" / "dps" mean the character of the only slot with that role.
+  aliases: {}                   # e.g. { mt: Tinkerdawn, lock: Gnope }
 
 layout:
   default: grid_auto            # grid_auto (best fit for your monitor) | grid_2x2 | grid_1x3 | main_thumbs | tabs

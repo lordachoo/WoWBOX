@@ -4,52 +4,7 @@ Features we've talked about and want later, each with a plan.
 
 ---
 
-## 1. `{arg}`: a word from the chat line as an argument
-
-**Goal:** "heal Gnope" makes Kunth cast on Gnope, and "heal" alone heals whoever asked.
-
-```yaml
-- name: heal-on-request
-  chat: { channel: [whisper, party], sender: team, contains: [heal], heard_by: Kunth }
-  do: { type: "/cast [@{arg|sender}] Healing Wave", to: Kunth }
-  cooldown: 3s
-```
-
-| Whisper | Keyword | `{arg}` | `{arg\|sender}` |
-|---|---|---|---|
-| "heal Gnope" | `heal` | `Gnope` | `Gnope` |
-| "light heal kunth pls" | `light heal` | `kunth` | `kunth` |
-| "heal" | `heal` | *(empty)* | the sender |
-| "heal target" | `heal` | `target` | `target` (Kunth's own target) |
-
-**Plan:**
-1. **Find the word** (`automation/engine.py`):
-   - `matched_word()` already finds the longest keyword in the line.
-   - Add `word_after(text, keyword)`: the first whitespace-separated word after the keyword, or `""`.
-   - Put it in the `values` dict in `on_chat` as `arg`, next to `sender`, `message`, `channel` and `listener`.
-2. **Fallback syntax** (`automation/actions.py`, `substitute`):
-   - Support `{name|fallback}`: use `fallback`'s value when `name` is empty, e.g. `{arg|sender}`.
-   - Only one level of fallback is needed.
-3. **Safety** (`safe_values`): clean `arg` exactly like `sender`, keeping only letters, digits and `-`. A word can never add a second command.
-4. **Editor** (`ui/automation_editor.py`): add `{arg}` and `{arg|sender}` to the placeholder hint under the steps for chat triggers.
-5. **Tests** (`tests/test_chat.py`):
-   - extraction, including the longest-keyword case;
-   - the fallback;
-   - cleaning, e.g. "heal Gnope;/run x" → `Gnope`;
-   - an empty arg with no fallback;
-   - a 27-byte line cut mid-name.
-6. **README** (section 13, chat rules): a recipe, plus the limits.
-
-**Limits to document:**
-- `[@name]` only reaches party and raid members.
-- Unit words (`target`, `focus`, `pet`, `player`) work and are a feature.
-- Only the first 27 bytes of the line arrive, so long names may be cut.
-
-**No addon change**, so no `/reload` needed. About an hour of work.
-
----
-
-## 2. Chat rules: only if the sender is in range
+## 1. Chat rules: only if the sender is in range
 
 **Goal:** "heal" from someone in another zone or out of range doesn't fire the rule or start its cooldown.
 
@@ -66,7 +21,7 @@ Needs `/reload` on every client.
 
 ---
 
-## 3. Buff watches: "if X is missing buff Y, cast it"
+## 2. Buff watches: "if X is missing buff Y, cast it"
 
 **Goal:** recast a buff when it actually drops, not on a timer.
 
@@ -83,7 +38,7 @@ Needs `/reload` on every client.
 
 ---
 
-## 4. "Who matched": act on the character that's low
+## 3. "Who matched": act on the character that's low
 
 **Goal:** one rule, "if anyone is below 30% health, the shaman heals *that* character".
 
@@ -127,7 +82,7 @@ Needs `/reload` on every client.
 | `first` | the lowest slot number. This is the default otherwise. |
 | `all` | every matched character: the steps run once per character, in turn. |
 
-**`cooldown_per: character`:** keeps a separate cooldown per matched character. Without it, the cooldown is per rule, as now.
+**`cooldown_per: character`:** keeps a separate cooldown per matched character. Without it, the cooldown is per rule, as now. Chat rules already have `cooldown_per: target` (per `{who}`); reuse `RuleRuntime.target_fired` and `cooling()`.
 
 **Plan:**
 1. **Engine** (`automation/engine.py`):
