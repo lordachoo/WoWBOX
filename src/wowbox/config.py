@@ -99,7 +99,10 @@ class LayoutConfig(_Model):
     default: LayoutName = "grid_auto"
     monitor: int = 1  # 1-based, in Windows' monitor order (primary first)
     thumbs_monitor: int | None = None  # None = strip on the same monitor
-    thumb_strip: float = 0.22  # fraction of the monitor height used by the thumbnail strip
+    thumb_strip: float = 0.22  # fraction of the monitor height used by the thumbnail strip (thumbs at the bottom)
+    # Where the thumbnails go on the main monitor. right: the main client keeps a 16:9 shape on the left and the
+    # thumbnails fill the column to its right. auto: right on wide monitors (21:9, 32:9), bottom otherwise.
+    thumb_side: Literal["auto", "right", "bottom"] = "auto"
     tab_bar_height: int = 28
 
 

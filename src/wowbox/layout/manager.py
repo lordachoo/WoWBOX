@@ -71,10 +71,7 @@ class LayoutManager:
         if self.team.main_slot not in [c.slot for c in clients] and clients:
             self.team.main_slot = clients[0].slot
         if self.current == "main_thumbs":
-            strip_work = self.monitor(self.cfg.thumbs_monitor).work if self.cfg.thumbs_monitor else None
-            if strip_work == work:
-                strip_work = None
-            self.main_area, strip = split_main_strip(work, self.cfg.thumb_strip, strip_work)
+            self.main_area, strip = self._main_strip()
             if self.tabs:
                 self.tabs.hide()
         else:  # tabs
@@ -89,6 +86,13 @@ class LayoutManager:
             self.thumbs.show_at(strip, self._thumb_entries(), self._mover)
         elif self.current == "tabs" and self.tabs:
             self.tabs.show_at(bar, [c.slot for c in clients], self.team.main_slot, self._mover)
+
+    def _main_strip(self) -> tuple[Rect, Rect]:
+        """main_thumbs: (main area, thumbnail strip)."""
+        work = self.monitor(self.cfg.monitor).work
+        strip_work = self.monitor(self.cfg.thumbs_monitor).work if self.cfg.thumbs_monitor else None
+        return split_main_strip(work, self.cfg.thumb_strip, None if strip_work == work else strip_work,
+                                self.cfg.thumb_side)
 
     def _thumb_entries(self) -> list[tuple[int, int]]:
         return [(c.slot, c.hwnd) for c in self.team.attached() if c.slot != self.team.main_slot]
@@ -108,10 +112,7 @@ class LayoutManager:
         if focus:
             self.windows.set_foreground(h)
         if self.current == "main_thumbs" and self.thumbs and self.main_area is not None:
-            work = self.monitor(self.cfg.monitor).work
-            strip_work = self.monitor(self.cfg.thumbs_monitor).work if self.cfg.thumbs_monitor else None
-            _, strip = split_main_strip(work, self.cfg.thumb_strip, None if strip_work == work else strip_work)
-            self.thumbs.show_at(strip, self._thumb_entries(), self._mover)
+            self.thumbs.show_at(self._main_strip()[1], self._thumb_entries(), self._mover)
         if self.current == "tabs" and self.tabs:
             self.tabs.set_main(slot)
 

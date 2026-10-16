@@ -26,6 +26,7 @@ layout:
   monitor: 1                    # 1 = primary
   thumbs_monitor: null          # e.g. 2 to put the thumbnails on monitor 2 (main_thumbs layout)
   thumb_strip: 0.22             # strip height as a fraction of the monitor, when on the same monitor
+  thumb_side: auto              # auto (right on wide 21:9/32:9 monitors, else bottom) | right | bottom
   tab_bar_height: 28
 
 hotkeys:                        # work while a WoW client or WoWBox has focus

@@ -41,10 +41,21 @@ def plan_grid(slots: list[int], area: Rect, cols: int, rows: int) -> dict[int, R
     return {s: cells[min(i, len(cells) - 1)] for i, s in enumerate(slots)}
 
 
-def split_main_strip(work: Rect, strip_frac: float, strip_work: Rect | None = None) -> tuple[Rect, Rect]:
-    """(main area, thumbnail strip). With strip_work (another monitor) the main area is the whole `work`."""
+WIDE_ASPECT = 2.0  # thumb_side auto: monitors wider than this (21:9, 32:9) get the thumbnails on the right
+MIN_COLUMN = 240  # thumbnails on the right: the narrowest column worth having
+
+
+def split_main_strip(work: Rect, strip_frac: float, strip_work: Rect | None = None,
+                     side: str = "bottom") -> tuple[Rect, Rect]:
+    """(main area, thumbnail strip). With strip_work (another monitor) the main area is the whole `work`.
+    side right (or auto on a wide monitor): a 16:9 main area on the left, the strip is the column to its right."""
     if strip_work is not None:
         return work, strip_work
+    if side == "auto":
+        side = "right" if work.w / max(1, work.h) > WIDE_ASPECT else "bottom"
+    if side == "right" and work.w - MIN_COLUMN > 0:
+        main_w = min(int(work.h * TARGET_ASPECT), work.w - MIN_COLUMN)
+        return Rect(work.x, work.y, main_w, work.h), Rect(work.x + main_w, work.y, work.w - main_w, work.h)
     strip_h = max(80, int(work.h * strip_frac))
     return Rect(work.x, work.y, work.w, work.h - strip_h), Rect(work.x, work.bottom - strip_h, work.w, strip_h)
 
@@ -58,7 +69,7 @@ def thumb_cells(strip: Rect, n: int, label_h: int = 20, pad: int = 4) -> list[tu
     """Cells inside the strip (coordinates relative to the strip): (cell, thumbnail area below the label)."""
     if n <= 0:
         return []
-    cols = n if strip.w >= strip.h * 2 else min(n, 2)
+    cols = _thumb_cols(strip, n, label_h, pad)
     rows = -(-n // cols)
     out = []
     for cell in grid_rects(Rect(0, 0, strip.w, strip.h), cols, rows)[:n]:
@@ -66,6 +77,21 @@ def thumb_cells(strip: Rect, n: int, label_h: int = 20, pad: int = 4) -> list[tu
                      max(1, cell.h - label_h - 2 * pad))
         out.append((cell, thumb))
     return out
+
+
+def _thumb_cols(strip: Rect, n: int, label_h: int, pad: int) -> int:
+    """The column count that gives the biggest 16:9 thumbnails (fewer empty cells breaks ties): one row in a wide
+    strip, one column in a tall one."""
+    best = None
+    for cols in range(1, n + 1):
+        rows = -(-n // cols)
+        w = strip.w / cols - 2 * pad
+        h = strip.h / rows - label_h - 2 * pad
+        scale = min(w / TARGET_ASPECT, h) if w > 0 and h > 0 else 0
+        score = (round(scale), -(cols * rows - n))
+        if best is None or score > best[0]:
+            best = (score, cols)
+    return best[1]
 
 
 def fit_aspect(area: Rect, src_w: int, src_h: int) -> Rect:

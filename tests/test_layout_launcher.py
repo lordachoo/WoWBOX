@@ -32,6 +32,23 @@ def test_main_strip_split():
     assert len(thumb_cells(strip, 3)) == 3
 
 
+def test_wide_monitor_puts_a_16_9_main_left_and_thumbs_right():
+    wide = Rect(0, 0, 3440, 1400)  # 21:9
+    for side in ("auto", "right"):
+        main, strip = split_main_strip(wide, 0.22, side=side)
+        assert main == Rect(0, 0, 2488, 1400) and strip == Rect(2488, 0, 952, 1400)
+    main, strip = split_main_strip(wide, 0.22, side="bottom")
+    assert main.w == 3440 and strip.y == main.bottom
+    assert split_main_strip(WORK, 0.22, side="auto")[0].w == 1920  # a 16:9 monitor keeps the strip at the bottom
+    cells = thumb_cells(strip, 3)  # a wide strip: one row
+    assert len({c.y for c, _ in cells}) == 1
+    cells = thumb_cells(split_main_strip(wide, 0.22, side="right")[1], 3)  # a tall column: one per row
+    assert len({c.x for c, _ in cells}) == 1 and len(cells) == 3
+    super_wide = Rect(0, 0, 5120, 1400)  # 32:9: a wide column, 2 across fits better for 4
+    main, strip = split_main_strip(super_wide, 0.22, side="auto")
+    assert main.w == 2488 and len({c.x for c, _ in thumb_cells(strip, 4)}) == 2
+
+
 class FakeThumbs:
     def __init__(self):
         self.shown = None

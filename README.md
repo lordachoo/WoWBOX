@@ -1145,7 +1145,7 @@ In the editor: trigger *State*, Who `3 (Kunth)`, condition `AFK = yes`, step *Pr
 |---|---|
 | `grid_auto` (default) | Picks the tiling whose cells come closest to 16:9 for your monitor and client count. 3 clients on a super-ultrawide end up side by side. |
 | `grid_2x2`, `grid_1x3` | Fixed borderless tiles on `layout.monitor`. |
-| `main_thumbs` | The main client fills the monitor except for a strip of live thumbnails. Click a thumbnail to swap. `layout.thumbs_monitor: 2` puts the strip on another monitor. |
+| `main_thumbs` | One big main client plus live thumbnails of the rest. Click a thumbnail to swap. On a wide monitor (21:9, 32:9) the main client keeps a 16:9 shape on the left and the thumbnails stack on the right; otherwise they sit in a strip along the bottom. `layout.thumb_side` (auto / right / bottom) picks; `layout.thumbs_monitor: 2` puts them on another monitor. |
 | `tabs` | One client fills the monitor, and a tab bar switches between them. |
 
 Ctrl+Alt+L cycles the layouts. In main_thumbs and tabs, all clients share one size and position, so swapping only raises a window. Nothing is resized, which avoids a D3D device reset.
@@ -1165,7 +1165,7 @@ Everything lives in `config\team.yaml`. The exe uses `config\team.yaml` next to 
 |---|---|
 | `client` | `exe`, `args`, `set_windowed_cvars`, `resolution`, `launch_stagger` (3s), `window_timeout` (120s), `rename_windows` |
 | `team` | `leader`, `slots: {n: {label, role, character}}` |
-| `layout` | `default`, `monitor`, `thumbs_monitor`, `thumb_strip` (0.22), `tab_bar_height` |
+| `layout` | `default`, `monitor`, `thumbs_monitor`, `thumb_strip` (0.22), `thumb_side` (auto), `tab_bar_height` |
 | `hotkeys` | `toggle_broadcast`, `release_all`, `follow`, `stay`, `stack`, `mirror_movement`, `cycle_layout`, `next_main`, `automation_kill`, `focus_slot: {n: chord}` |
 | `broadcast` | `enabled_on_start`, `chatguard`, `chatguard_open_keys`, `chatguard_close_keys`, `modifier_mode` (post / focus_swap / strip), `focus_swap_dwell`, `only_when_wow_focused`, `type_wait_max` (8 s), `type_quiet` (0.35 s) |
 | `follow`, `stack` | section 11 |
