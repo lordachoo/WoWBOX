@@ -18,6 +18,10 @@
 --   /bb stack               everyone walks onto your spot and facing
 --   /bb follow | stay       follow mode on (everyone follows the leader) / off
 --   /bb mirror              movement mirroring on/off
+-- The party panel (BoxBridgePanel.lua):
+--   /bb panel               show/hide it on this character: who follows whom, who casts what on whom, HP/mana
+--   /bb panel alert         sound + warning when someone stops following (on/off)
+--   /bb panel reset         put it back in its default place
 --                                                                e.g. /bb to Gnope assist Tinkerdawn
 
 local NUM_BYTES = 56
@@ -434,15 +438,26 @@ SlashCmdList["BOXBRIDGE"] = function(msg)
     queueChat(COMMAND, who, text)
     p("-> " .. who .. ": " .. text)
     return
+  elseif cmd == "panel" then
+    if BoxBridgePanel_Command then BoxBridgePanel_Command(string.lower(arg or "")) end
+    return
   elseif cmd == "status" then
     p(string.format("enabled=%s size=%d height=%s (using %d) hz=%d chat=%s chat filter=%s dropped=%d",
       tostring(db.enabled), db.size, tostring(db.height), renderHeight(), db.hz, tostring(db.chat),
       filterVersion() == 0 and "none" or ("version " .. filterVersion()), dropped))
     return
   else
-    p("usage: /bb [all|others <command> | to <who> <command> | stack | follow | stay | mirror | size <px> | "
-      .. "height <px> | hz <n> | chat | words | test <Name> <text> | status]")
+    p("usage: /bb [all|others <command> | to <who> <command> | stack | follow | stay | mirror | panel | "
+      .. "size <px> | height <px> | hz <n> | chat | words | test <Name> <text> | status]")
     return
   end
   apply()
 end
+
+-- for BoxBridgePanel.lua: tell WoWBox something (a /bb command it handles itself). False while the bridge is off.
+BoxBridgeAPI = {
+  wowbox = function(text)
+    if not db or not db.enabled then return false end
+    return queueChat(COMMAND, "@wowbox", text)
+  end,
+}

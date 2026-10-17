@@ -32,12 +32,11 @@ class Tray(QSystemTrayIcon):
         self.act_broadcast = QAction("Broadcast", menu, checkable=True,
                                      triggered=lambda on: self.c.router.set_enabled(on))
         self.act_auto = QAction("Automation", menu, checkable=True, triggered=lambda on: self.c.engine.set_enabled(on))
-        self.act_overlay = QAction("Overlay", menu, checkable=True, triggered=lambda on: self.c.set_overlay(on))
         act_release = QAction("Release all keys", menu, triggered=self.c.router.release_all)
         act_logs = QAction("Open logs folder", menu, triggered=self._open_logs)
         act_logs.setVisible(self.c.diag.log_dir is not None)
         act_quit = QAction("Quit", menu, triggered=self.window.quit_app)
-        for a in (self.act_show, None, self.act_broadcast, self.act_auto, self.act_overlay, act_release, None,
+        for a in (self.act_show, None, self.act_broadcast, self.act_auto, act_release, None,
                   act_logs, act_quit):
             menu.addSeparator() if a is None else menu.addAction(a)
         self.setContextMenu(menu)
@@ -68,4 +67,3 @@ class Tray(QSystemTrayIcon):
         self.setToolTip(f"WoWBox - broadcast {'ON' if on else 'OFF'}, automation {'ON' if auto else 'OFF'}")
         self.act_broadcast.setChecked(on)
         self.act_auto.setChecked(auto)
-        self.act_overlay.setChecked(self.c.overlay.isVisible())

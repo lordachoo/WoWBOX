@@ -176,5 +176,3 @@ memread:                        # optional, read-only ReadProcessMemory. Off by 
   # fields:
   #   player_hp: { address: "0x00BD0000", module: "Wow.exe", offsets: ["0x24"], type: u32 }   # you supply and verify offsets
 
-ui:
-  overlay: false

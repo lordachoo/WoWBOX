@@ -37,8 +37,8 @@ from .layout.tabs import TabBar
 from .memread.reader import MemReadPoller
 from .platform.base import CaptureAPI, InputAPI, WindowAPI
 from .router import ChatGuard, RouteTable, Router
+from .panel import PanelLink
 from .team import Team
-from .ui.overlay import Overlay
 
 UI_TICK_MS = 250  # the UI heartbeat: a late one means the UI thread was busy
 
@@ -115,7 +115,9 @@ class Controller(QObject):
                                   on_done=self.sig_stack_done.emit, boost=self.bridge.boost,
                                   moving_since=lambda: self.router.last_movement)
         self._apply_stack_cfg()
-        self.overlay = Overlay()
+        # WoWBox's state in BoxBridge's in-game panel (/bb panel): spelled out on three spare keys
+        self.panel = PanelLink(lambda chord, slot: self.router.send_chord(chord, [slot]), self.panel_flags,
+                               self.team.slot_for_hwnd)
         # the chat filter (Words.lua) BoxBridge loads: its version, or None when there isn't one
         self.words_version: int | None = None
         self.words_problem: str | None = None  # why it couldn't be written
@@ -126,7 +128,6 @@ class Controller(QObject):
         self.dropped: dict[int, int] = {}  # slot -> chat lines its BoxBridge dropped since WoWBox started
 
         self.sig_hotkey.connect(self._on_hotkey)
-        self.sig_changed.connect(self._update_overlay)
         self.sig_launch_done.connect(self._after_launch)
         self.sig_identity.connect(self._on_identity)
         self.sig_chat.connect(self._on_chat)
@@ -135,7 +136,7 @@ class Controller(QObject):
         self._refresh_timer = QTimer(self, timeout=self._refresh, interval=1000)
         self._auto_timer = QTimer(self, timeout=self._tick,
                                   interval=int(1000 / max(1.0, cfg.automation_options.tick_hz)))
-        self._overlay_timer = QTimer(self, timeout=self._update_overlay, interval=300)
+        self._panel_timer = QTimer(self, timeout=self._panel_tick, interval=500)
         self._own_diag = diag is None  # tests: watch nothing, start no thread
         self.diag = diag or Diagnostics(None)
         self._ui_timer = QTimer(self, timeout=self._ui_tick, interval=UI_TICK_MS)
@@ -200,8 +201,7 @@ class Controller(QObject):
             if self.diag.unclean_exit:
                 self.activity.add("app", "diagnostics", f"{self.diag.unclean_exit[0].upper()}"
                                   f"{self.diag.unclean_exit[1:]}: see wowbox.log", kind="skipped")
-        if self.cfg.ui.get("overlay", False):
-            self.set_overlay(True)
+        self._panel_timer.start()
         log.info("WoWBox ready: %d client(s) attached, %d route chord(s), broadcast %s",
                  len(self.team.attached()), len(self.router.routes), "ON" if self.router.enabled else "OFF")
 
@@ -217,7 +217,7 @@ class Controller(QObject):
         self.router.stop()
         self.bridge.stop()
         self.memread.stop()
-        self.overlay.hide()
+        self._panel_timer.stop()
         self.thumbs.clear()
         self.tabs.hide()
         logging.getLogger().removeHandler(self.log_handler)
@@ -267,16 +267,6 @@ class Controller(QObject):
         self.engine.dry_run = on
         self.cfg.automation_options.dry_run = on
         log.info("automation dry run %s", "ON" if on else "OFF")
-
-    def set_overlay(self, on: bool) -> None:
-        self.cfg.ui["overlay"] = on
-        if on:
-            self._update_overlay()
-            self.overlay.show()
-            self._overlay_timer.start()
-        else:
-            self.overlay.hide()
-            self._overlay_timer.stop()
 
     # ------------------------------------------------------------------ settings (the Settings tab)
     def apply_setting(self, section: str, key: str, raw: object) -> str | None:
@@ -698,6 +688,9 @@ class Controller(QObject):
 
     def team_command(self, origin: int, who: str, text: str) -> list[int]:
         """`/bb all|others|to <who> <command>` typed in the client in slot `origin`: type it in the clients meant."""
+        if who == "@wowbox" and text.strip().lower().startswith("panel"):
+            self.panel.on_command(self.team.hwnd(origin), text.strip()[5:])  # quietly: it answers every change
+            return []
         sender = self.team.clients[origin].name if origin in self.team.clients else str(origin)
         if not self.cfg.bridge.commands:
             log.warning("/bb %s %s ignored: bridge.commands is off", who, text)
@@ -907,15 +900,13 @@ class Controller(QObject):
                 f" | follow: {'ON' if self.follow.active else 'OFF'}{' + mirror' if self.router.mirror else ''}"
                 f" | layout: {self.layout.current} | hook re-installs: {rehooks}")
 
-    def _update_overlay(self) -> None:
-        if not self.overlay.isVisible() and not self._overlay_timer.isActive():
-            return
-        active = self.router.active_slot()
-        on = self.router.enabled
-        typing = self.chatguard.paused(active)
-        color = "#e74c3c" if not on else ("#f1c40f" if typing else "#2ecc71")
-        state = "OFF" if not on else ("PAUSED - chat" if typing else "ON")
-        who = self.team.clients[active].name if active else "-"
-        auto = f" | AUTO{' (dry)' if self.engine.dry_run else ''}" if self.engine.enabled else ""
-        follow = (" | FOLLOW" if self.follow.active else "") + (" | MIRROR" if self.router.mirror else "")
-        self.overlay.set_text(f"<span style='color:{color}'>BROADCAST {state}</span> | {who}{follow}{auto}")
+    def panel_flags(self) -> dict[str, bool]:
+        """What the in-game panel's title line shows (see panel.py)."""
+        e = self.engine
+        return {"broadcast": self.router.enabled, "automation": e.enabled, "dry_run": e.dry_run,
+                "paused": bool(e.paused_reason or (e.enabled and e.blocked)), "follow": self.follow.active,
+                "mirror": self.router.mirror}
+
+    def _panel_tick(self) -> None:
+        if self.cfg.broadcast.modifier_mode == "post":  # the panel keys are Ctrl+Alt+Shift chords
+            self.panel.tick()

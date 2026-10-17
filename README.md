@@ -63,7 +63,7 @@ Class targets such as `class:WARLOCK` and `class:SHAMAN` work for any team.
 | **Movement mirroring** | Optionally copies your W/A/S/D/Q/E/Space to the followers, so they move in lockstep with you. They re-stack every time you stop. |
 | **Macros** | A hotkey runs a sequence: type `/assist Tinkerdawn` on Gnope, then press 1–9 and 0 a second apart. |
 | **Automation** | Rules triggered by state ("healer mana < 40 % and out of combat → drink"), by timers, or by chat ("Tinkerdawn whispers *heal* → Kunth heals him"). Off and in dry run by default. |
-| **Safety switches** | Broadcast toggle, release-all-keys panic button, automation kill switch, chat guard, an always-on-top status overlay. |
+| **Safety switches** | Broadcast toggle, release-all-keys panic button, automation kill switch, chat guard. |
 
 ## 2. How it works
 
@@ -120,7 +120,7 @@ powershell -ExecutionPolicy Bypass -File setup.ps1
 
 ## 5. The BoxBridge addon and `/bb` commands
 
-Copy `addon\BoxBridge` to `<WoW>\Interface\AddOns\BoxBridge` and enable it on the character screen for **every** character. After updating the addon, `/reload` every client. When an update adds a file to the addon (as 1.1 added `Words.lua`), **quit and restart** the clients instead: WoW reads an addon's list of files only at start-up.
+Copy `addon\BoxBridge` to `<WoW>\Interface\AddOns\BoxBridge` and enable it on the character screen for **every** character. After updating the addon, `/reload` every client. When an update adds a file to the addon (as 1.1 added `Words.lua` and 1.3 `BoxBridgePanel.lua`), **quit and restart** the clients instead: WoW reads an addon's list of files only at start-up.
 
 A thin strip of coloured squares appears in the top-left corner. That's the bridge: leave it visible, and don't cover it with other UI. WoWBox works without the bridge, but then you lose:
 - live status;
@@ -141,6 +141,7 @@ All in-game commands (`/bb` is short for `/boxbridge`):
 | `/bb stack` | Everyone walks onto *your* spot and facing (the client you typed it in). |
 | `/bb follow`, `/bb stay` | Follow mode on / off. |
 | `/bb mirror` | Movement mirroring on / off. |
+| `/bb panel` | Show or hide the party panel on this character (see below). `/bb panel alert` turns the follow warning on or off; `/bb panel reset` puts the panel back in its default place. |
 | `/bb` | Turn the strip on or off. |
 | `/bb status` | Show the current settings. |
 | `/bb size <px>` | Block size, 2–32 (default 8). Bigger copes better with small windows. Also set `bridge.block_size` in `team.yaml` to match. |
@@ -151,6 +152,27 @@ All in-game commands (`/bb` is short for `/boxbridge`):
 | `/bb test <Name> <text>` | Pretend `<Name>` whispered `<text>`, for testing chat automation. It says so if the chat filter drops it. |
 
 Settings are saved per character.
+
+### The party panel (`/bb panel`)
+
+A small frame on the character you play, showing what your team is doing without looking at WoWBox. Type `/bb panel` once on that character (it's remembered per character); drag it to move it.
+
+```
+WoWBox: BROADCAST ON  AUTO  FOLLOW
+ Tinkerdawn                       ███ 100%  ██ 82%
+ Kunth     -> Tinkerdawn          ███  98%  ██ 64%  Healing Wave  > Gnope ▓▓▓░
+*Gnope     -> Tinkerdawn          ███  91%  ██ 40%  Shadow Bolt  > Kobold Miner
+ Tinkerbow not following          ███  77%  ██ 90%  drinking
+```
+
+- **Title line: WoWBox's own state.** Broadcast on or off, automation (with *dry run*), *rules PAUSED* (a client's bridge can't be read), follow mode, mirroring. It changes when the state does. Until WoWBox has sent it: *no state yet*.
+- **Follow:** who each character is following, or *not following* in orange. When someone stops following, the panel waits 2 seconds (follow mode re-follows by itself), then **warns**: a raid warning (*Kunth stopped following*), a sound and a flashing row. No warning when WoWBox's follow mode is off (you told them to stay), or for the dead. `/bb panel alert` turns it off.
+- **Casting:** the spell, its target and a cast bar. When an automation types `/cast [@Gnope] Healing Wave` into Kunth, you see *Healing Wave > Gnope* at once. Instant casts show for a moment; failed or interrupted casts say *(failed)*.
+- **Health and mana bars,** *DEAD*, *drinking*, a red `*` in combat, and a dimmed row with *far* when they're out of range.
+
+How it gets there:
+- **The party's own information** comes from each client's BoxBridge, in hidden addon messages to the party (nothing in chat). So every client needs BoxBridge 1.3 for its follow and cast targets to show; health, mana and casting come from the game for everyone.
+- **WoWBox's state** can only reach the game as key presses: WoWBox spells it out on three spare keys BoxBridge binds, **Ctrl+Alt+Shift+F7, F8 and F9**, sent only to clients showing the panel and only when the state changes (seven presses). The panel answers through the bridge with what it got, so presses lost while you were typing there are sent again. Don't bind those keys to anything else. This needs `broadcast.modifier_mode: post` (the default); with the other modes the title line stays at *no state yet*.
 
 ### The chat filter (`Words.lua`)
 
@@ -193,7 +215,6 @@ On start, WoWBox attaches to every running `Wow.exe` window. It puts each window
 | **Stack** | Everyone walks onto the spot and facing of the window you're in (F12). Press again to cancel. |
 | **Mirror movement** | Copy movement keys to followers (Ctrl+Alt+M). |
 | **Automation ON/OFF**, **Dry run** | Automation always starts OFF, in dry run. |
-| **Overlay** | Small always-on-top status line: broadcast, active character, follow, automation. |
 | **Release keys** | Key-up for everything on every client (Ctrl+Alt+Pause). |
 
 **Second row:** Launch missing, Attach running, Arrange, the Layout and Leader pickers, Restore frames (puts window borders back), Reload config, Save config.
@@ -1221,7 +1242,6 @@ Everything lives in `config\team.yaml`. The exe uses `config\team.yaml` next to 
 | `automation` | section 13. Kept in `config/automation.yaml` once you've saved from the rule editor. |
 | `automation_options` | `enabled_on_start` (false), `dry_run` (true), `tick_hz` (10), `pause_on_stale_bridge` (true), `chat_queue` (5), `chat_queue_ttl` (60 s), `rule_gap` (1.5 s), `wait_for_casts` (true), `cast_wait_max` (10 s), `skip_dead` (true), `skip_far` (true) |
 | `memread` | optional read-only memory reader: `enabled` (false), `hz`, `fields: {name: {address, module, offsets, type}}`. No addresses ship with WoWBox; you supply and verify them. |
-| `ui` | `overlay: true` shows the overlay on start |
 
 ## 17. Building the standalone exe
 
@@ -1260,10 +1280,11 @@ src/wowbox/
   rule_store.py         automation.yaml: the same for automation rules
   config_text.py        Save config: edits team.yaml in place, keeping comments
   commands.py           /bb team commands (the client you typed in goes last)
+  panel.py              WoWBox's state on BoxBridge's in-game party panel (three spare keys)
   layout/               grid maths, thumbnail strip, tab bar, layout manager
   platform/             Win32 windows / input / capture (ctypes), and fakes for tests
   memread/              optional read-only memory reader
-  ui/                   main window, macro and rule editors, tray icon, overlay
+  ui/                   main window, macro and rule editors, rule list, tray icon
 tests/                  pytest suite
 ```
 

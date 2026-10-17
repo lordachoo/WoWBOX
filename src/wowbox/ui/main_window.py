@@ -100,8 +100,6 @@ class MainWindow(QMainWindow):
         self.cb_dry = QCheckBox("Dry run")
         self.cb_dry.setChecked(self.c.engine.dry_run)
         self.cb_dry.toggled.connect(self.c.set_dry_run)
-        self.cb_overlay = QCheckBox("Overlay")
-        self.cb_overlay.toggled.connect(self.c.set_overlay)
         b_release = QPushButton("Release keys", clicked=self.c.router.release_all)
         hk = self.c.cfg.hotkeys
         self.b_follow = QPushButton(clicked=lambda: self.c.follow.set_active(not self.c.follow.active))
@@ -119,8 +117,7 @@ class MainWindow(QMainWindow):
         b_reload = QPushButton("Reload config", clicked=self.c.reload_config)
         b_save = QPushButton("Save config", clicked=self.c.save_config)
 
-        for group in ((self.b_broadcast, self.b_follow, self.b_stack, self.cb_mirror, self.b_auto, self.cb_dry, self.cb_overlay,
-                       b_release),
+        for group in ((self.b_broadcast, self.b_follow, self.b_stack, self.cb_mirror, self.b_auto, self.cb_dry, b_release),
                       (b_launch, b_attach, b_arrange, QLabel("Layout:"), self.layout_combo, QLabel("Leader:"),
                        self.leader_combo, b_frames, b_reload, b_save)):
             bar = QHBoxLayout()
@@ -580,7 +577,7 @@ class MainWindow(QMainWindow):
         self.b_stack.setStyleSheet("background: #6a1b9a; color: white; font-weight: bold;" if stacking else "")
         self.b_follow.setText(f"Follow: {'ON' if following else 'OFF'}")
         self.b_follow.setStyleSheet("background: #1565c0; color: white; font-weight: bold;" if following else "")
-        for cb, value in ((self.cb_overlay, self.c.overlay.isVisible()), (self.cb_dry, self.c.engine.dry_run),
+        for cb, value in ((self.cb_dry, self.c.engine.dry_run),
                           (self.cb_mirror, self.c.router.mirror)):
             if cb.isChecked() != value:
                 cb.blockSignals(True)
