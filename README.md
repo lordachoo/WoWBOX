@@ -141,7 +141,7 @@ All in-game commands (`/bb` is short for `/boxbridge`):
 | `/bb stack` | Everyone walks onto *your* spot and facing (the client you typed it in). |
 | `/bb follow`, `/bb stay` | Follow mode on / off. |
 | `/bb mirror` | Movement mirroring on / off. |
-| `/bb rule <name>` | Turn a WoWBox automation rule on or off. The start of its name is enough: `/bb rule aven`. |
+| `/bb rule <name>` | Turn a WoWBox automation rule on or off. The start of its name is enough: `/bb rule holy`. |
 | `/bb panel` | Show or hide the party panel on this character (see below). `/bb panel alert` turns the follow warning on or off; `/bb panel reset` puts the panel back in its default place. |
 | `/bb` | Turn the strip on or off. |
 | `/bb status` | Show the current settings. |
@@ -745,7 +745,7 @@ automation:
 - **`slot`:** a number, a list, `any` (the default) or `all`.
 - **Every other key** is a bridge field. Add `_lt`, `_lte`, `_gt`, `_gte` or `_ne` to compare.
 - **Fields:** `health_pct`, `power_pct`, `power_type`, `target_exists`, `target_hostile`, `target_dead`, `target_is_player`, `target_in_combat`, `target_health_pct`, `combat`, `resting`, `in_party`, `in_raid`, `typing`, `chat_open`, `casting`, `channeling`, `mounted`, `dead`, `ghost`, `afk`, `following`, `level`, `position_ok`, `map_x`, `map_y`, `facing`, `map_id`, `fps`.
-- **`ready: <spell>`:** that spell could be cast now: known, off its cooldown *and* the global cooldown, with enough mana or rage (*spell ready* in the editor's field list). `ready_ne` is the opposite; a list (`ready: [Holy Shield, Avenger's Shield]`) needs all of them. See *Keep a spell on cooldown* below.
+- **`ready: <spell>`:** that spell could be cast now: known, off its cooldown *and* the global cooldown, with enough mana or rage (*spell ready* in the editor's field list). `ready_ne` is the opposite; a list (`ready: [Holy Shield, Consecration]`) needs all of them. See *Keep a spell on cooldown* below.
 - **Who matched: `{name}`.** When the condition matches, the steps can use the character it matched:
 
   | Placeholder | Filled with |
@@ -768,23 +768,33 @@ automation:
 
 ### Keep a spell on cooldown: `ready:`
 
-For "cast Avenger's Shield every time it's ready", ask the bridge whether the spell is ready instead of guessing with a timer:
+Example: keep the tank's **Holy Shield** up in big fights, turned on and off from inside the game. Rather than guessing with a timer, the rule asks the bridge whether the spell is ready:
 
 ```yaml
-  - name: Avenger's Shield on cooldown
-    enabled: false                       # off until a big fight: /bb rule aven, or the hotkey
-    when: { slot: 1, ready: "Avenger's Shield", combat: true, target_hostile: true, casting: false }
-    do: { send: "Ctrl+Shift+F5", to: Tinkerdawn }   # the shield bound to Ctrl+Shift+F5 in WoW
+  - name: HOLY SHIELD UP
+    enabled: false                       # off until a big fight
+    when: { slot: 1, ready: Holy Shield, combat: true, target_hostile: true, casting: false }
+    do: { type: /cast Holy Shield, to: "class:PALADIN" }
     cooldown: 2s
-    hotkey: Ctrl+Alt+A                   # on/off
-    panel: true                          # the in-game panel says whether it's on
+    hotkey: Ctrl+Alt+A                   # press it to turn the rule on or off
+    panel: true                          # the in-game panel shows HOLY SHIELD UP ON / off
 ```
 
-- **How it knows:** WoWBox writes the spells your rules ask about into `Words.lua` (`spells`, up to 7; rules that are off count too, so turning one on in a fight needs no `/reload`), and BoxBridge reports which of them could be cast now, about 10 times a second. After adding or changing a `ready:` spell, `/bb all reload` (the banner reminds you, as for chat words). Until the client has loaded the new list, the condition is false. `/bb words` lists the watched spells and whether each is ready.
+In the editor: Trigger *State: when a condition is true*, Who `1` (the tank's slot), conditions *spell ready* = `Holy Shield`, *in combat* = yes, *target is hostile* = yes, *casting* = no; one step typing `/cast Holy Shield` to `class:PALADIN`; *On/off hotkey* Ctrl+Alt+A; tick *Show on the in-game panel*.
+
+**Using it:**
+1. Save the rule, then `/bb all reload` once so the clients load the spell list (the banner reminds you).
+2. Check on the tank with `/bb words`: it lists `watched spell: Holy Shield (ready)`, and *not ready* right after you cast it.
+3. Make sure automation is **ON** and **Dry run** is unticked (the panel's title shows **AUTO** in blue). Automation always starts OFF, in dry run, when WoWBox starts.
+4. In a big fight press **Ctrl+Alt+A**, or type **`/bb rule holy`**. The panel shows *HOLY SHIELD UP ON*. From then on, whenever you're in combat with a hostile target and Holy Shield is ready, WoWBox casts it. Press or type it again to turn it off.
+
+How it works:
+- **How it knows:** WoWBox writes the spells your rules ask about into `Words.lua` (`spells`, up to 7; rules that are off count too, so turning one on in a fight needs no `/reload`), and BoxBridge reports which of them could be cast now (known, off its cooldown and the global cooldown, enough mana), about 10 times a second. After adding or changing a `ready:` spell, `/bb all reload`. Until the client has loaded the new list, the condition is false.
 - **The spell's name** as the game spells it; any case.
-- **Press a key, don't type:** bind the spell to a spare key in WoW and `send:` it. One key press doesn't open the chat box in the window you're playing, and like every automation step it waits while you're holding keys there.
-- **Turning it on and off from the game:** `/bb rule <name>` (the start of the name is enough: `/bb rule aven`) or the rule's **On/off hotkey** (`hotkey:`, in the editor). With *Show on the in-game panel* (`panel: true`) the panel's second line says whether it's on.
-- The same works for any "keep it rolling" spell: Holy Shield, Hammer of the Righteous, a hunter's Kill Shot when it lights up.
+- **Typing or a key:** `/cast Holy Shield` works, but briefly opens the chat box in the window you're playing. If that gets in the way, put the spell on an action bar slot with a keybind (e.g. Ctrl+Shift+F5) and have the step `send:` that key instead. Either way the step waits while you're holding keys there.
+- **On and off from the game:** the rule's **On/off hotkey** (`hotkey:`) or `/bb rule <name>`, where the start of the name is enough. With *Show on the in-game panel* (`panel: true`) the panel's second line says whether it's on.
+- **Why it isn't firing:** the rule's *Next* column in the Automation tab says which condition isn't true, e.g. *Holy Shield not ready* or *combat is no*.
+- The same works for any "keep it rolling" spell: Avenger's Shield, Hammer of the Righteous, a hunter's Kill Shot when it lights up.
 
 ### Timers: `every:`
 
