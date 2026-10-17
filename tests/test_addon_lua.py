@@ -235,3 +235,15 @@ def test_addon_target_id():
     assert _draw(g).target_id not in (0, first)
     g.U.target = None
     assert _draw(g).target_id == 0
+
+
+def test_addon_target_range():
+    lua, g = _load()
+    lua.execute('DIST = 5\nfunction CheckInteractDistance(u, i) return DIST <= (i == 3 and 10 or 28) and 1 or nil end')
+    assert _draw(g).target_range == 10 and _draw(g).class_token == "PALADIN"
+    g.DIST = 20
+    assert _draw(g).target_range == 28
+    g.DIST = 60
+    assert _draw(g).target_range == 100
+    g.U.target = None
+    assert _draw(g).target_range == 100

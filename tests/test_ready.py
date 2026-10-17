@@ -232,3 +232,17 @@ def test_same_target_condition():
     assert not condition_report(by_name, states)[0]  # neither has... the tank has none: never "the same"
     del states[1]
     assert "no bridge data" in condition_report(by_name, states)[1][0][2]
+
+
+# ---------------------------------------------------------------- real distance: `target_range`
+def test_target_range_rides_with_the_class():
+    for code, yards in ((1, 10), (2, 28), (3, 100), (0, 999)):
+        strip = encode({"name": "Gnope", "class": "WARLOCK", "range_code": code}, 3, 8)
+        img = np.full((strip.shape[0] + 10, strip.shape[1] + 40, 3), 37, dtype=np.uint8)
+        img[: strip.shape[0], : strip.shape[1]] = strip
+        st = decode(img)
+        assert (st.class_token, st.target_range) == ("WARLOCK", yards)
+    near = Condition.model_validate({"slot": 2, "target_range_lte": 10})
+    assert condition_report(near, {2: ClientState(target_range=10)})[0]
+    assert not condition_report(near, {2: ClientState(target_range=28)})[0]
+    assert not condition_report(near, {2: ClientState()})[0]  # an older addon: unknown, never near

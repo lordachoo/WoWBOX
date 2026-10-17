@@ -17,7 +17,7 @@ Byte stream (2 bytes per block):
     16  level               17  party-exists bits (0-3); bits 4-7: chat lines dropped (queue full), mod 16
     18-37  character name, UTF-8, zero padded (20 bytes)
     38-40  target id: a 24-bit hash of the target's GUID, high byte first (0 = no target, or an older addon)
-    41  class (CLASS_IDS)
+    41  class (CLASS_IDS, bits 0-3); bits 4-5: target distance (1: within ~10 yd, 2: ~28 yd, 3: farther / none; 0: older addon)
     42-44  map x, 0-16777215 = 0.0-1.0 (GetPlayerMapPosition; high byte first)
     45-47  map y, same
     48-49  facing, 0-65535 = 0-2pi radians (GetPlayerFacing: 0 = north, counter-clockwise)
@@ -72,6 +72,8 @@ CHAT_AFTER_WORD = CHAT_TEXT_BYTES.stop - CHAT_TEXT_BYTES.start - 2  # bytes of t
 NUM_BYTES = 56
 MAX_WATCHED_SPELLS = 7
 MAX_DOTS = 14
+RANGE_UNKNOWN = 999  # an older addon: no distance, so `target_range_lte` is never true
+TARGET_RANGES = (RANGE_UNKNOWN, 10, 28, 100)  # yards, by the 2 bits in byte 41 (100: farther, or no target)
 NUM_BLOCKS = NUM_BYTES // 2
 
 # flag bits
@@ -144,6 +146,7 @@ class ClientState:
     ready: tuple[str, ...] = ()  # those spells by name, lower case (filled in by WoWBox from the list the client loaded)
     dot_bits: int = 0  # bit i: DoT i+1 (Words.lua `dots`) should go on the target now
     dots: tuple[str, ...] = ()  # those DoTs by name, lower case
+    target_range: int = RANGE_UNKNOWN  # yards to the target, measured by the game: 10, 28, 100 (farther / none)
     target_id: int = 0  # which mob the target is (the same in every client); 0: no target, or an older addon
     level: int = 0
     party_health_pct: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
@@ -295,7 +298,8 @@ def _to_state(d: bytes) -> ClientState:
         dot_bits=(tf >> 5) | (inp >> 2) << 3 | (d[5] >> 3) << 9,
         name=_text(d[NAME_BYTES_V1 if d[1] == KIND_STATE_V1 else NAME_BYTES]),
         target_id=0 if d[1] == KIND_STATE_V1 else _u24(d, TARGET_ID_BYTES),
-        class_token=_text(d[CLASS_BYTES]) if d[1] == KIND_STATE_V1 else CLASS_TOKENS.get(d[41], ""),
+        class_token=_text(d[CLASS_BYTES]) if d[1] == KIND_STATE_V1 else CLASS_TOKENS.get(d[41] & 15, ""),
+        target_range=RANGE_UNKNOWN if d[1] == KIND_STATE_V1 else TARGET_RANGES[d[41] >> 4 & 3],
         **({} if d[1] == KIND_STATE_V1 else _position(d)),
     )
 
@@ -328,7 +332,7 @@ def encode_bytes(values: dict, frame: int) -> list[int]:
     data += list(v.get("name", "").encode("utf-8")[:20].ljust(20, bytes(1)))
     tid = v.get("target_id", 0)
     data += [tid >> 16 & 255, tid >> 8 & 255, tid & 255]
-    data.append(CLASS_IDS.get(v.get("class", ""), 0))
+    data.append(CLASS_IDS.get(v.get("class", ""), 0) | v.get("range_code", 0) << 4)
     pos = v.get("pos")  # (x, y, facing, map_id, level) or None
     if pos:
         x, y, facing, map_id, level = pos

@@ -280,6 +280,15 @@ local function targetId()
   return h == 0 and 1 or h
 end
 
+-- how far the target really is (CheckInteractDistance: the game measures it, whatever spell ranges or auras say):
+-- 1 within about 10 yards, 2 within about 28, 3 farther or no target
+local function targetRange()
+  if not UnitExists("target") or not CheckInteractDistance then return 3 end
+  if CheckInteractDistance("target", 3) then return 1 end
+  return CheckInteractDistance("target", 4) and 2 or 3
+end
+local RANGE_WORDS = { "within about 10 yards", "within about 28 yards", "farther than 28 yards" }
+
 local function snapshot()
   local tExists = UnitExists("target") and true or false
   local inRaid = GetNumRaidMembers() > 0
@@ -319,7 +328,7 @@ local function snapshot()
   d[#d + 1] = math.floor(id / 65536)
   d[#d + 1] = math.floor(id / 256) % 256
   d[#d + 1] = id % 256
-  d[#d + 1] = CLASS_IDS[classToken or ""] or 0
+  d[#d + 1] = (CLASS_IDS[classToken or ""] or 0) + targetRange() * 16
   addPosition(d)
   return d
 end
@@ -491,6 +500,7 @@ local function bbCommand(msg)
       end
       p("target id: " .. (UnitExists("target") and (targetId() .. " (characters on the same mob show the same id)")
         or "no target") .. " | guid: " .. tostring(UnitGUID and UnitGUID("target")))
+      if UnitExists("target") then p("target distance: " .. RANGE_WORDS[targetRange()]) end
     end
     p(dropped .. " line(s) dropped since login because the queue was full")
     return

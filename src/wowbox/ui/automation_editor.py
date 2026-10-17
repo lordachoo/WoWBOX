@@ -35,6 +35,7 @@ FIELDS = [
     ("target_dead", "target is dead", "bool"),
     ("target_is_player", "target is a player", "bool"),
     ("target_in_combat", "target in combat", "bool"),
+    ("target_range", "target's distance, yards (10, 28 or 100 = farther; measured by the game)", "number"),
     ("in_party", "in a party", "bool"),
     ("in_raid", "in a raid", "bool"),
     ("level", "level", "number"),

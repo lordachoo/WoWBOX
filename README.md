@@ -747,6 +747,7 @@ automation:
 - **Fields:** `health_pct`, `power_pct`, `power_type`, `target_exists`, `target_hostile`, `target_dead`, `target_is_player`, `target_in_combat`, `target_health_pct`, `combat`, `resting`, `in_party`, `in_raid`, `typing`, `chat_open`, `casting`, `channeling`, `mounted`, `dead`, `ghost`, `afk`, `following`, `level`, `position_ok`, `map_x`, `map_y`, `facing`, `map_id`, `fps`.
 - **`ready: <spell>`:** that spell could be cast now: known, off its cooldown *and* the global cooldown, with enough mana or rage, and for a spell cast at your target, the target in range (*spell ready* in the editor's field list). `ready_ne` is the opposite; a list (`ready: [Holy Shield, Consecration]`) needs all of them. See *Keep a spell on cooldown* below.
 - **`dot: <spell>`:** that DoT should go on the target now: castable (as for `ready:`), and not on the target from *you*, or with less than 2 seconds left (*DoT needed* in the editor). See *Keep DoTs up* below.
+- **`target_range: <yards>`:** how far the target is, measured by the game in steps: 10, 28, or 100 (farther, or no target); e.g. `target_range_lte: 10`. An older BoxBridge reports 999 (unknown). See *Fight only the tank's mob* below.
 - **`same_target: <character>`:** this character's target is the same mob as that character's (a name or a slot number; *same target as* in the editor). `same_target_ne:` is the opposite: it has a target, but not that one's. See *Fight only the tank's mob* below.
 - **Who matched: `{name}`.** When the condition matches, the steps can use the character it matched:
 
@@ -831,14 +832,16 @@ A DoT has no cooldown, so `ready:` would recast it every few seconds. `dot:` ask
     do: { type: /assist Tinkerdawn, to: "class:WARLOCK" }
     cooldown: 3s
 
-  - name: NEC pet attack                  # the pet only goes for the tank's mob, and only within spell range
-    when: { slot: 2, target_hostile: true, target_in_combat: true, same_target: Tinkerdawn, ready: Corruption }
+  - name: NEC pet attack                  # the pet only goes for the tank's mob, and only when it's close
+    when: { slot: 2, target_hostile: true, target_dead: false, target_in_combat: true, same_target: Tinkerdawn,
+            target_range_lte: 10 }
     do: { type: /petattack, to: "class:WARLOCK" }
     cooldown: 5s
 ```
 
 - **Add it to every rule that attacks** (pet, shots, DoTs). The Next column says why one waits: *not Tinkerdawn's target*, *Tinkerdawn has no target*, *no target*.
-- **`ready:` as a range check:** `ready: Corruption` is only true when Corruption could hit that target now, so a mob 60 yards away never gets the pet. A hunter can use a shot without a cooldown (Steady Shot), but shots don't work up close.
+- **`target_dead: false`:** a corpse stays hostile, and "in combat" for a few seconds, and the tank often keeps it targeted. Without this the rules keep casting at it.
+- **Distance: `target_range`.** The game measures how far the target really is, in steps: `10` (within about 10 yards), `28` (about 28), `100` (farther, or no target). `target_range_lte: 10` keeps the pet home unless the mob is close. Don't use `ready:` as a range check for this: the game's spell range check doesn't know about every aura (on EQWOW an aura that shortens a warlock's spell range still reports *in range* at full range); `/bb words` shows the distance and what the game says.
 - **Every client needs BoxBridge 1.4.** An older one reports no target, so `same_target` is never true there and those rules wait. `/bb words` shows the target's id: two characters on the same mob show the same number.
 
 ### Timers: `every:`
