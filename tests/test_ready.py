@@ -246,3 +246,18 @@ def test_target_range_rides_with_the_class():
     assert condition_report(near, {2: ClientState(target_range=10)})[0]
     assert not condition_report(near, {2: ClientState(target_range=28)})[0]
     assert not condition_report(near, {2: ClientState()})[0]  # an older addon: unknown, never near
+
+
+def test_target_changes_are_logged_with_whose_mob_it_is(c, caplog):
+    import logging
+    caplog.set_level(logging.INFO, logger="wowbox.app")
+    lead = c.team.leader
+    other = next(s for s in c.team.clients if s != lead)
+    c.team.clients[lead].state = ClientState(name="Tinkerdawn", target_id=7)
+    c._on_bridge_state(other, ClientState(name="Tinkerbow", target_id=9, target_hostile=True, target_range=100))
+    c._on_bridge_state(other, ClientState(name="Tinkerbow", target_id=9))  # unchanged: not logged again
+    c._on_bridge_state(other, ClientState(name="Tinkerbow", target_id=7, target_hostile=True, target_range=10))
+    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("target:")]
+    assert len(lines) == 2
+    assert "Tinkerbow -> mob #9" in lines[0] and "NOT the leader's mob (#7)" in lines[0] and "farther" in lines[0]
+    assert "the leader's mob" in lines[1] and "within 10 yd" in lines[1]

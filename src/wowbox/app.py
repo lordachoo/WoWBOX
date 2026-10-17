@@ -124,6 +124,7 @@ class Controller(QObject):
         self.words_version: int | None = None
         self.words_problem: str | None = None  # why it couldn't be written
         self.chat_filters: dict[int, words.ChatFilter] = {}  # every Words.lua version seen -> its words
+        self._targets: dict[int, int] = {}  # slot -> the target id it last showed (to log each change)
         self._words_checked = 0.0
         self._reload_asked: dict[int, float] = {}  # slot -> when WoWBox last typed /reload for the filter
         self._dropped_seen: dict[int, int] = {}  # slot -> the addon's dropped-lines counter (mod 16) last seen
@@ -406,10 +407,29 @@ class Controller(QObject):
             st.dots = tuple(n.lower() for i, n in enumerate(f.dots if f else ()) if st.dot_bits >> i & 1)
         elif st.ready or st.dots:
             st.ready = st.dots = ()
+        if not st.stale and self._targets.get(slot, 0) != st.target_id:
+            self._targets[slot] = st.target_id
+            self._log_target(slot, st)
         c = self.team.clients.get(slot)
         if c and st.name and not st.stale and (st.name, st.class_token) != (c.character, c.class_token):
             c.character, c.class_token = st.name, st.class_token
             self.sig_identity.emit()
+
+    def _log_target(self, slot: int, st: ClientState) -> None:
+        """Each target change, in the log: whose mob it is, so a character on the wrong mob can be traced back."""
+        who = st.name or f"slot {slot}"
+        if not st.target_id:
+            log.info("target: %s has no target", who)
+            return
+        lead = self.team.clients.get(self.team.leader)
+        ls = lead.state if lead and slot != self.team.leader else None
+        whose = ("" if ls is None else "; the leader's mob" if ls.target_id == st.target_id
+                 else f"; NOT the leader's mob (#{ls.target_id})" if ls.target_id else "; the leader has no target")
+        flags = [f for f, on in (("hostile", st.target_hostile), ("dead", st.target_dead),
+                                 ("in combat", st.target_in_combat), ("player", st.target_is_player)) if on]
+        dist = {10: "within 10 yd", 28: "within 28 yd", 100: "farther than 28 yd"}.get(st.target_range, "distance ?")
+        log.info("target: %s -> mob #%d (%s, %s, %.0f%% hp)%s", who, st.target_id, ", ".join(flags) or "friendly",
+                 dist, st.target_health_pct, whose)
 
     def _on_chat(self, slot: int, ev: ChatEvent) -> None:  # main thread
         c = self.team.clients.get(slot)
