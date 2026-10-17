@@ -194,3 +194,17 @@ def test_a_rule_that_waited_its_turn_still_goes_if_its_condition_holds():
     e.tick(0)
     e.tick(2)
     assert sender.sent == [("F1", [3]), ("F2", [3])]
+
+
+def test_a_waiting_rule_is_not_dropped_for_the_global_cooldown():
+    # the DoT before it has just put every spell on the global cooldown: `ready:`/`dot:` read "not now" for a moment
+    first = {"name": "first", "when": {"slot": 3, "power_pct_gt": 50}, "do": {"send": "F1", "to": [3]},
+             "cooldown": "1m", "priority": 5}
+    dot = {"name": "dot", "when": {"slot": 3, "power_pct_gt": 50, "dot": "Corruption"},
+           "do": {"send": "F2", "to": [3]}, "cooldown": "1m"}
+    e, sender, src = engine([first, dot], rule_gap=1.5)
+    src.st[3] = ClientState(power_pct=80, dots=("corruption",))
+    e.tick(0)
+    src.st[3] = ClientState(power_pct=80)  # global cooldown
+    e.tick(2)
+    assert sender.sent == [("F1", [3]), ("F2", [3])]

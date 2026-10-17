@@ -561,6 +561,14 @@ class AutomationEngine:
         ok, per = condition_report(rt.rule.when, states, rt.preds, self.options.skip_dead, self._far(rt, states))
         return ok, per, self._matched_values(rt, per, states) if ok else {}
 
+    def _still_holds(self, rt: RuleRuntime) -> bool:
+        """The condition again when a waiting rule's turn comes, without `ready:` and `dot:`: the cast of the
+        rule before it has just put every spell on the global cooldown, so those read "not now" for a moment."""
+        assert rt.rule.when is not None
+        states = self.source.states()
+        preds = [p for p in rt.preds if p[0] not in ("ready", "dots")]
+        return condition_report(rt.rule.when, states, preds, self.options.skip_dead, self._far(rt, states))[0]
+
     def _far(self, rt: RuleRuntime, states: dict[int, ClientState | None]) -> dict[int, str]:
         """Characters too far from every character the rule acts on: slot -> why (e.g. "in another zone")."""
         apart = getattr(self.source, "too_far_apart", None)
@@ -781,8 +789,7 @@ class AutomationEngine:
                 if later > now:
                     rt.resume_at = later  # another rule's cast or global cooldown on that character first
                     return
-                if waited and rt.rule.when is not None and rt.rule.chat is None \
-                        and not self._check(rt, self.source.states())[0]:
+                if waited and rt.rule.when is not None and rt.rule.chat is None and not self._still_holds(rt):
                     # it waited its turn: only go if the condition still holds. A DoT queued behind nine others
                     # must not be cast once the mob is dead (the game then picks the nearest mob for it, and the
                     # pet runs after that one)
