@@ -181,6 +181,8 @@ CD = { ["Avenger's Shield"] = { 0, 0 }, ["Holy Shield"] = { 100, 8 }, ["Consecra
 NOMANA = { Consecration = true }
 function GetSpellCooldown(name) local c = CD[name]; if c then return c[1], c[2], 1 end end
 function IsUsableSpell(name) return CD[name] ~= nil and not NOMANA[name] end
+RANGE = { Exorcism = 1 }  -- in range of the target; others: no range (nil) unless set
+function IsSpellInRange(name, unit) return RANGE[name] end
 """
 
 
@@ -210,6 +212,8 @@ def test_watched_spells_ready_bits(gs):
     # Avenger's Shield ready; Holy Shield cooling down; Consecration no mana; A, B on the global cooldown
     assert st.ready_bits == 0b100001
     assert st.combat and st.chat_filter == 5  # the other bits in those bytes are untouched
+    gs.RANGE["Exorcism"] = 0  # too close / too far: not ready, or a failing cast would fire forever
+    assert state_frame(gs).ready_bits == 0b000001
 
 
 def test_bb_rule_goes_to_wowbox(gs):

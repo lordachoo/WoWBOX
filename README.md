@@ -745,7 +745,7 @@ automation:
 - **`slot`:** a number, a list, `any` (the default) or `all`.
 - **Every other key** is a bridge field. Add `_lt`, `_lte`, `_gt`, `_gte` or `_ne` to compare.
 - **Fields:** `health_pct`, `power_pct`, `power_type`, `target_exists`, `target_hostile`, `target_dead`, `target_is_player`, `target_in_combat`, `target_health_pct`, `combat`, `resting`, `in_party`, `in_raid`, `typing`, `chat_open`, `casting`, `channeling`, `mounted`, `dead`, `ghost`, `afk`, `following`, `level`, `position_ok`, `map_x`, `map_y`, `facing`, `map_id`, `fps`.
-- **`ready: <spell>`:** that spell could be cast now: known, off its cooldown *and* the global cooldown, with enough mana or rage (*spell ready* in the editor's field list). `ready_ne` is the opposite; a list (`ready: [Holy Shield, Consecration]`) needs all of them. See *Keep a spell on cooldown* below.
+- **`ready: <spell>`:** that spell could be cast now: known, off its cooldown *and* the global cooldown, with enough mana or rage, and for a spell cast at your target, the target in range (*spell ready* in the editor's field list). `ready_ne` is the opposite; a list (`ready: [Holy Shield, Consecration]`) needs all of them. See *Keep a spell on cooldown* below.
 - **Who matched: `{name}`.** When the condition matches, the steps can use the character it matched:
 
   | Placeholder | Filled with |
@@ -789,7 +789,7 @@ In the editor: Trigger *State: when a condition is true*, Who `1` (the tank's sl
 4. In a big fight press **Ctrl+Alt+A**, or type **`/bb rule holy`**. The panel shows *HOLY SHIELD UP ON*. From then on, whenever you're in combat with a hostile target and Holy Shield is ready, WoWBox casts it. Press or type it again to turn it off.
 
 How it works:
-- **How it knows:** WoWBox writes the spells your rules ask about into `Words.lua` (`spells`, up to 7; rules that are off count too, so turning one on in a fight needs no `/reload`), and BoxBridge reports which of them could be cast now (known, off its cooldown and the global cooldown, enough mana), about 10 times a second. After adding or changing a `ready:` spell, `/bb all reload`. Until the client has loaded the new list, the condition is false.
+- **How it knows:** WoWBox writes the spells your rules ask about into `Words.lua` (`spells`, up to 7; rules that are off count too, so turning one on in a fight needs no `/reload`), and BoxBridge reports which of them could be cast now (known, off its cooldown and the global cooldown, enough mana, target in range for spells cast at it), about 10 times a second. The range check matters: a shot from too close fails without going on cooldown, so without it the spell would stay "ready" and the rule would fire over and over. After adding or changing a `ready:` spell, `/bb all reload`. Until the client has loaded the new list, the condition is false.
 - **The spell's name** as the game spells it; any case.
 - **Typing or a key:** `/cast Holy Shield` works, but briefly opens the chat box in the window you're playing. If that gets in the way, put the spell on an action bar slot with a keybind (e.g. Ctrl+Shift+F5) and have the step `send:` that key instead. Either way the step waits while you're holding keys there.
 - **On and off from the game:** the rule's **On/off hotkey** (`hotkey:`) or `/bb rule <name>`, where the start of the name is enough. With *Show on the in-game panel* (`panel: true`) the panel's second line says whether it's on.
@@ -1045,7 +1045,7 @@ A live dashboard of everything rules and macros do. It updates four times a seco
 
 ### Common to all rules
 
-- `cooldown:` is the minimum time between firings.
+- `cooldown:` is the minimum time between firings. A state rule fires again at most once a second even without one, so a cast that keeps failing can't flood a client.
 - `enabled: false` keeps a rule in the file but switched off.
 - A rule that's still running its sequence won't start again (chat rules queue the request instead).
 - **Two rules on one character take turns.** When a step from one rule wants a character that another rule just used, it waits for both of these:

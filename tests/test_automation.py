@@ -58,6 +58,15 @@ def test_condition_and_cooldown():
     assert len(sender.sent) == 2
 
 
+def test_state_rule_without_cooldown_fires_at_most_once_a_second():
+    # a cast that keeps failing (e.g. out of range) never goes on cooldown in the game: its condition stays true
+    rule = {"name": "shot", "when": {"slot": 3, "power_pct_gt": 50}, "do": {"send": "F2", "to": [3]}}
+    e, sender, _ = engine([rule], rule_gap=0)
+    for t in range(30):
+        e.tick(t / 10)  # 3 s of ticks, 0.1 s apart
+    assert len(sender.sent) == 3
+
+
 def test_every_and_sequence_with_wait():
     rule = {"name": "buff", "every": "10s",
             "do": {"sequence": [{"send": "F5", "to": "all"}, {"wait": "1.5s"}, {"send": "F6", "to": "all"}]}}

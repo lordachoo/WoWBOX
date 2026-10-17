@@ -146,7 +146,8 @@ local function wanted(channel, text)
 end
 
 -- watched spells (Words.lua `spells`, what WoWBox's `ready:` conditions ask about): bit i set while spell i+1
--- could be cast now: known, off its cooldown and the global cooldown, enough mana/rage
+-- could be cast now: known, off its cooldown and the global cooldown, enough mana/rage, and (for a spell cast at
+-- your target) the target in range: a shot from too close fails without going on cooldown, so it'd stay "ready"
 local MAX_SPELLS = 7
 local function spellsReady()
   local f = BoxBridgeWords
@@ -155,7 +156,8 @@ local function spellsReady()
   for i, name in ipairs(f.spells) do
     if i > MAX_SPELLS then break end
     local start, duration, enabled = GetSpellCooldown(name)
-    if start and enabled == 1 and (start == 0 or duration == 0) and IsUsableSpell(name) then v = v + 2 ^ (i - 1) end
+    local ok = start and enabled == 1 and (start == 0 or duration == 0) and IsUsableSpell(name)
+    if ok and IsSpellInRange(name, "target") ~= 0 then v = v + 2 ^ (i - 1) end -- nil: not a spell for the target
   end
   return v
 end

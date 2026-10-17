@@ -24,7 +24,10 @@ OPS: dict[str, Callable[[object, object], bool]] = {
 }
 CLAIM_RECHECK = 0.05  # a step queued behind another rule's waiting step looks again this soon
 RULE_NAME = re.compile(r"^\s*rule (['\"])(.+?)\1")  # "rule 'heal' fired ..." -> heal
-CHAT_DEDUPE = 2.0  # the same party/raid line heard by several of your clients fires a rule once
+CHAT_DEDUPE = 2.0
+# a state rule fires again at most this often, whatever its cooldown: a cast that keeps failing (out of range)
+# never goes on cooldown in the game, so its condition stays true and would fire on every tick
+STATE_MIN_GAP = 1.0  # the same party/raid line heard by several of your clients fires a rule once
 
 
 class Sender(Protocol):
@@ -490,7 +493,8 @@ class AutomationEngine:
             if rt.rule.chat is not None:
                 self._next_request(rt, now, states)
                 continue
-            if rt.last_fired is not None and now - rt.last_fired < rt.rule.cooldown:
+            gap = rt.rule.cooldown if rt.rule.every is not None else max(rt.rule.cooldown, STATE_MIN_GAP)
+            if rt.last_fired is not None and now - rt.last_fired < gap:
                 continue
             if rt.rule.every is not None:
                 if rt.next_due is None:
