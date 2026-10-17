@@ -39,10 +39,11 @@ def test_spells_come_from_enabled_ready_conditions():
     rules = [AVENGER,
              rule("two", {"slot": 1, "ready": ["avenger's shield", "Holy Shield"]}),
              rule("not", {"slot": 1, "ready_ne": "Hammer of the Righteous"}),
-             rule("off", {"slot": 1, "ready": "Consecration"}, enabled=False)]
-    assert words.spells_asked(rules) == ["Avenger's Shield", "Holy Shield", "Hammer of the Righteous"]
+             rule("off", {"slot": 1, "ready": "Consecration"}, enabled=False)]  # off now, on in a fight
+    assert words.spells_asked(rules) == ["Avenger's Shield", "Holy Shield", "Hammer of the Righteous",
+                                         "Consecration"]
     f = words.build(rules)
-    assert f.spells == ("Avenger's Shield", "Holy Shield", "Hammer of the Righteous")
+    assert f.spells == ("Avenger's Shield", "Holy Shield", "Hammer of the Righteous", "Consecration")
     assert f.panel == ("Avenger's Shield on cooldown",)
 
 
@@ -114,6 +115,13 @@ def test_bb_rule_toggles_by_the_start_of_its_name(c):
     c.team_command(1, "@wowbox", "rule nothing")
     assert "no rule matches" in c.activity.items()[-1].text
     assert c.find_rule("buff tgt")[0].name == "Shaman Buff Tgt"  # inside the name, when nothing starts so
+
+
+def test_turning_a_rule_on_or_off_leaves_words_lua_alone(c):
+    version = c.words_version
+    c.team_command(1, "@wowbox", "rule aven")
+    c.team_command(1, "@wowbox", "rule aven")
+    assert c.words_version == version  # the clients' loaded list stays right: no /reload needed
 
 
 def test_rule_hotkey_toggles_and_shows_as_taken(c):

@@ -780,7 +780,7 @@ For "cast Avenger's Shield every time it's ready", ask the bridge whether the sp
     panel: true                          # the in-game panel says whether it's on
 ```
 
-- **How it knows:** WoWBox writes the spells your enabled rules ask about into `Words.lua` (`spells`, up to 7), and BoxBridge reports which of them could be cast now, about 10 times a second. After adding or changing a `ready:` spell, `/bb all reload` (the banner reminds you, as for chat words). Until the client has loaded the new list, the condition is false. `/bb words` lists the watched spells and whether each is ready.
+- **How it knows:** WoWBox writes the spells your rules ask about into `Words.lua` (`spells`, up to 7; rules that are off count too, so turning one on in a fight needs no `/reload`), and BoxBridge reports which of them could be cast now, about 10 times a second. After adding or changing a `ready:` spell, `/bb all reload` (the banner reminds you, as for chat words). Until the client has loaded the new list, the condition is false. `/bb words` lists the watched spells and whether each is ready.
 - **The spell's name** as the game spells it; any case.
 - **Press a key, don't type:** bind the spell to a spare key in WoW and `send:` it. One key press doesn't open the chat box in the window you're playing, and like every automation step it waits while you're holding keys there.
 - **Turning it on and off from the game:** `/bb rule <name>` (the start of the name is enough: `/bb rule aven`) or the rule's **On/off hotkey** (`hotkey:`, in the editor). With *Show on the in-game panel* (`panel: true`) the panel's second line says whether it's on.

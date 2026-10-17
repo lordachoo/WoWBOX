@@ -58,10 +58,11 @@ _LOWER = {c: c + 32 for c in range(ord("A"), ord("Z") + 1)}
 
 
 def spells_asked(rules: list[AutomationRule]) -> list[str]:
-    """The spells enabled rules' `ready:` conditions ask about, in order (each once, any case)."""
+    """The spells rules' `ready:` conditions ask about, in order (each once, any case). Disabled rules count
+    too: turning a rule on in a fight (/bb rule) mustn't change the list the clients loaded."""
     out: list[str] = []
     for r in rules:
-        if not r.enabled or r.when is None:
+        if r.when is None:
             continue
         for key, value in (r.when.model_extra or {}).items():
             if key in ("ready", "ready_ne"):
