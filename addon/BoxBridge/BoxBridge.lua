@@ -473,7 +473,9 @@ SlashCmdList["BOXBRIDGE"] = function(msg)
       if type(BoxBridgeWords.spells) == "table" then
         local r = spellsReady()
         for i, name in ipairs(BoxBridgeWords.spells) do
-          p("  watched spell: " .. name .. (math.floor(r / 2 ^ (i - 1)) % 2 == 1 and " (ready)" or " (not ready)"))
+          p("  watched spell: " .. name .. (math.floor(r / 2 ^ (i - 1)) % 2 == 1 and " (ready)" or " (not ready)")
+            .. " | in range: " .. tostring(IsSpellInRange(name, "target")) .. ", usable: "
+            .. tostring((IsUsableSpell(name))))
         end
       end
       if type(BoxBridgeWords.dots) == "table" then
@@ -484,7 +486,7 @@ SlashCmdList["BOXBRIDGE"] = function(msg)
         end
       end
       p("target id: " .. (UnitExists("target") and (targetId() .. " (characters on the same mob show the same id)")
-        or "no target"))
+        or "no target") .. " | guid: " .. tostring(UnitGUID and UnitGUID("target")))
     end
     p(dropped .. " line(s) dropped since login because the queue was full")
     return
