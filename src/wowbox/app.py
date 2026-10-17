@@ -507,6 +507,20 @@ class Controller(QObject):
                            for r in self.cfg.automation])
         log.info("automation rule %r %s", name, "enabled" if on else "disabled")
 
+    def set_rules_enabled(self, names: list[str], on: bool) -> None:
+        """Several at once (a group's box in the Automation tab): one save."""
+        wanted = set(names)
+        self._store_rules([r.model_copy(update={"enabled": on}) if r.name in wanted else r
+                           for r in self.cfg.automation])
+        log.info("automation rules %s %s", ", ".join(repr(n) for n in names), "enabled" if on else "disabled")
+
+    def rule_members(self):
+        """Who is in each slot, for grouping rules by who acts: live from the bridge, else team.yaml."""
+        from .automation.grouping import Member
+        slots = self.cfg.team.slots
+        return [Member(c.slot, c.character or (slots[c.slot].character if c.slot in slots else None) or "",
+                       c.label, c.role, c.class_token) for c in self.team.clients.values()], self.team.leader
+
     def _store_rules(self, rules: list[AutomationRule]) -> None:
         path = automation_path(self.cfg_path)
         if path.exists():

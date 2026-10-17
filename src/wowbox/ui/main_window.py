@@ -3,26 +3,24 @@ from __future__ import annotations
 
 import logging
 import math
-import time
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QHBoxLayout, QHeaderView, QLabel, QMainWindow,
-    QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout,
+    QMessageBox, QPlainTextEdit, QPushButton, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout,
     QWidget,
 )
 
 from ..config import RouteConfig
 from ..keys import expand_key_spec
 from ..layout import LAYOUT_ORDER
-from ..macro_store import fmt_duration
 from .activity_tab import ActivityTab
+from .rule_list import RuleList
 from .settings_tab import SettingsTab
 
 log = logging.getLogger(__name__)
 
-AUTO_COLS = ["On", "Name", "Trigger", "Actions", "Status", "Next", "Last fired", "Fired"]
 CLIENT_COLS = ["Slot", "Character", "Label", "Role", "PID", "Window", "Status", "Broadcast", "HP", "Power", "Target",
                "State", "Position", "Bridge"]
 
@@ -461,97 +459,25 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ automation
     def _build_automation_tab(self) -> QWidget:
-        self.auto_table = QTableWidget(0, len(AUTO_COLS))
-        self.auto_table.setHorizontalHeaderLabels(AUTO_COLS)
-        self.auto_table.verticalHeader().setVisible(False)
-        hh = self.auto_table.horizontalHeader()
-        hh.setSectionResizeMode(QHeaderView.ResizeToContents)
-        for col, width in (("Trigger", 300), ("Actions", 260), ("Next", 230)):  # long text: fixed, cut with ...
-            hh.setSectionResizeMode(AUTO_COLS.index(col), QHeaderView.Interactive)
-            self.auto_table.setColumnWidth(AUTO_COLS.index(col), width)
-        hh.setSectionResizeMode(AUTO_COLS.index("Actions"), QHeaderView.Stretch)
-        self.auto_table.setTextElideMode(Qt.ElideRight)
-        self.auto_table.itemChanged.connect(self._auto_item_changed)
-        self.auto_table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.auto_table.cellDoubleClicked.connect(lambda row, col: col and self._rule_edit(row))
-        self.auto_status = QLabel()
-        buttons = QHBoxLayout()
-        row = self.auto_table.currentRow
-        for text, fn in (("New", lambda: self._rule_edit(None)), ("Edit", lambda: self._rule_edit(row())),
-                         ("Duplicate", lambda: self._rule_edit(row(), copy=True)),
-                         ("Delete", lambda: self._rule_delete(row()))):
-            buttons.addWidget(QPushButton(text, clicked=fn))
-        buttons.addStretch(1)
-        hint = QLabel("Double-click a rule to edit it; the On box enables or disables it. Rules are saved in "
-                      "config/automation.yaml. Automation as a whole is switched on in the toolbar and starts in "
-                      "dry run (logs only). Kill switch hotkey: " + str(self.c.cfg.hotkeys.automation_kill) + ".")
-        hint.setWordWrap(True)
-        w = QWidget()
-        lay = QVBoxLayout(w)
-        lay.addWidget(self.auto_status)
-        lay.addWidget(self.auto_table)
-        lay.addLayout(buttons)
-        lay.addWidget(hint)
-        return w
+        hint = ("Double-click a rule to edit it; the On box enables or disables it, and a group's box all the "
+                "rules it shows. Rules are saved in config/automation.yaml. Automation as a whole is switched on "
+                "in the toolbar and starts in dry run (logs only). Kill switch hotkey: "
+                + str(self.c.cfg.hotkeys.automation_kill) + ".")
+        self.rule_list = RuleList(self.c, on_edit=self._rule_edit, on_delete=self._rule_delete, hint=hint)
+        return self.rule_list
 
     def load_automation(self) -> None:
-        from ..automation.actions import describe
-        t = self.auto_table
-        t.blockSignals(True)
-        t.setRowCount(0)  # drops the old rows' countdown bars too
-        t.setRowCount(len(self.c.engine.rules))
-        for r, rt in enumerate(self.c.engine.rules):
-            on = _item("")
-            on.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
-            on.setCheckState(Qt.Checked if rt.rule.enabled else Qt.Unchecked)
-            t.setItem(r, 0, on)
-            t.setItem(r, 1, _item(rt.rule.name))
-            if rt.rule.chat is not None:
-                ch = rt.rule.chat
-                trig = f"chat {'/'.join(ch.channel)}"
-                if ch.sender:
-                    trig += f" from {', '.join(ch.sender)}"
-                if ch.contains:
-                    trig += f" containing {' or '.join(repr(w) for w in ch.contains)}"
-                trig += f" heard by {ch.heard_by}"
-                if rt.rule.when is not None:
-                    trig += " when " + ", ".join(f"{k}={v}" for k, v in rt.rule.when.model_dump().items())
-            elif rt.rule.every is not None:
-                trig = f"every {fmt_duration(rt.rule.every)}"
-            else:
-                trig = "when " + ", ".join(f"{k}={v}" for k, v in rt.rule.when.model_dump().items())
-            if rt.rule.cooldown:
-                trig += f" (cooldown {fmt_duration(rt.rule.cooldown)})"
-            for col, text in (("Trigger", trig), ("Actions", describe(rt.steps))):
-                it = _item(text)
-                it.setToolTip(text)  # the column cuts long text; hover shows all of it
-                t.setItem(r, AUTO_COLS.index(col), it)
-            for col in ("Status", "Next", "Last fired", "Fired"):
-                t.setItem(r, AUTO_COLS.index(col), _item(""))
-            if rt.rule.every is not None:  # timers get a countdown bar
-                bar = QProgressBar()
-                bar.setRange(0, 1000)
-                bar.setTextVisible(True)
-                t.setCellWidget(r, AUTO_COLS.index("Next"), bar)
-        t.blockSignals(False)
-        self.refresh_automation()
+        self.rule_list.load()
 
-    def _auto_item_changed(self, item: QTableWidgetItem) -> None:
-        if item.column() == 0 and item.row() < len(self.c.engine.rules):
-            rule = self.c.engine.rules[item.row()].rule
-            on = item.checkState() == Qt.Checked
-            if on != rule.enabled:
-                self.c.set_rule_enabled(rule.name, on)
-
-    def _rule_edit(self, row: int | None, copy: bool = False) -> None:
+    def _rule_edit(self, name: str | None, copy: bool = False) -> None:
         from .automation_editor import RuleEditor
         rules = [rt.rule for rt in self.c.engine.rules]
         names = [r.name for r in rules]
         rule = None
-        if row is not None:
-            if not 0 <= row < len(rules):
+        if name is not None:
+            if name not in names:
                 return
-            rule = rules[row]
+            rule = rules[names.index(name)]
         source = rule.name if rule else None
         if rule and copy:
             new_name = f"{rule.name}-copy"
@@ -576,39 +502,14 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 QMessageBox.warning(self, "Rule not saved", str(e))
 
-    def _rule_delete(self, row: int) -> None:
-        rules = [rt.rule for rt in self.c.engine.rules]
-        if not 0 <= row < len(rules):
+    def _rule_delete(self, name: str) -> None:
+        if name not in {rt.rule.name for rt in self.c.engine.rules}:
             return
-        if QMessageBox.question(self, "Delete rule", f"Delete the rule {rules[row].name!r}?") == QMessageBox.Yes:
-            self.c.delete_rule(rules[row].name)
+        if QMessageBox.question(self, "Delete rule", f"Delete the rule {name!r}?") == QMessageBox.Yes:
+            self.c.delete_rule(name)
 
     def refresh_automation(self) -> None:
-        e = self.c.engine
-        t = self.auto_table
-        now = time.monotonic()
-        for r, rt in enumerate(e.rules):
-            st = e.status(rt, now)
-            for col, text in (("Status", st.state), ("Last fired", st.last), ("Fired", str(rt.fire_count))):
-                it = t.item(r, AUTO_COLS.index(col))
-                if it and it.text() != text:
-                    it.setText(text)
-            nxt = AUTO_COLS.index("Next")
-            if isinstance(bar := t.cellWidget(r, nxt), QProgressBar):
-                bar.setValue(int((st.progress or 0) * 1000))
-                bar.setFormat(st.next or st.state)  # e.g. "disabled"
-            elif (it := t.item(r, nxt)) and it.text() != st.next:
-                it.setText(st.next)
-            status = t.item(r, AUTO_COLS.index("Status"))
-            if status:
-                color = ("#9e9e9e" if st.state in ("disabled", "automation OFF") or st.state.startswith("paused")
-                         else "#ef6c00" if st.state.startswith(("cooldown", "running")) else
-                         "#2e7d32" if st.ready or st.state == "waiting" else None)
-                status.setForeground(QColor(color) if color else QColor())
-        state = "ON" if e.enabled else "OFF"
-        extra = " (dry run)" if e.dry_run else ""
-        paused = f" - PAUSED: {e.paused_reason}" if e.paused_reason else ""
-        self.auto_status.setText(f"Automation {state}{extra}{paused}")
+        self.rule_list.refresh()
 
     def banner_lines(self) -> tuple[list[str], bool]:
         """What the banner says, and whether any of it is serious (rules not running)."""
