@@ -346,6 +346,7 @@ class AutomationEngine:
                     rt.next_due = prev.next_due
             runtimes.append(rt)
         self.rules = runtimes
+        self._claims.clear()  # the new runtimes wait for nothing yet: an old claim would block that character forever
 
     def status(self, rt: RuleRuntime, now: float) -> RuleStatus:
         """What a rule is doing and when it fires next, for the Automation tab."""
@@ -811,7 +812,8 @@ class AutomationEngine:
         if o.rule_gap <= 0 and not o.wait_for_casts:
             return now
         later, why = now, ""
-        ahead = [c for s in slots if (c := self._claims.get(s)) and c[0] != me and c[1] >= prio]
+        waiting = {r.rule.name for r in self.rules if r.wait_reason}  # a claim only counts while its rule waits
+        ahead = [c for s in slots if (c := self._claims.get(s)) and c[0] != me and c[1] >= prio and c[0] in waiting]
         others = [last for s in slots if (last := self._slot_last.get(s)) and last[1] != me]
         latest = max(others, default=None)  # (time, rule) of another rule's last step on these characters
         casting = [s for s in slots if self._casting(s) and self._slot_last.get(s, (0.0, ""))[1] != me]

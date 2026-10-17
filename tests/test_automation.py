@@ -146,3 +146,19 @@ def test_disabled_rule_and_any_slot():
 def test_unknown_field_rejected():
     with pytest.raises(ValueError, match="unknown condition field"):
         engine([{"name": "x", "when": {"mana_lt": 3}, "do": {"send": "1"}}])
+
+
+def test_a_claim_left_by_a_rule_that_stopped_waiting_blocks_nothing():
+    # a rule waiting for a character claims it (it goes first); reloading the rules, or the rule's condition
+    # turning false, must not leave that claim behind: it blocked every rule on that character for good
+    dot = {"name": "dot", "when": {"slot": 3, "combat": True}, "do": {"send": "F3", "to": [3]}, "priority": 10}
+    assist = {"name": "assist", "when": {"slot": 3, "power_pct_gt": 50}, "do": {"send": "F2", "to": [3]},
+              "cooldown": "5s"}
+    e, sender, _ = engine([dot, assist])
+    e._claims[3] = ("dot", 10)  # as "dot" left it, waiting when the rules were reloaded
+    e.load([rt.rule for rt in e.rules])
+    e.tick(0)
+    assert sender.sent == [("F2", [3])]
+    e._claims[3] = ("dot", 10)  # stale: "dot" isn't waiting (its condition is false)
+    e.tick(6)
+    assert sender.sent == [("F2", [3])] * 2
