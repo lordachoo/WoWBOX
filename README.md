@@ -799,8 +799,8 @@ BoxBridge passes every whisper, party, raid, guild, officer, say and yell line i
 `{who}` works out who "someone" is in a line like "heal &lt;someone&gt;", from the words after the matched one:
 
 1. Filler words are skipped: on, for, to, at, pls, plz, please, now, thx, ty, thanks.
-2. Nothing left, or `me` / `self` / `myself`: the **sender**.
-3. `target`, `focus`, `mouseover`, `pet`, `player`: used as they are, so `[@target]` is the caster's own target.
+2. Nothing left, or `me` / `self` / `myself` / `i`: the **sender**.
+3. `target`, `focus`, `mouseover`, `pet`, `player`, `targettarget`: used as they are, so `[@target]` is the caster's own target.
 4. A **role**: `tank`, `healer` or `dps` mean the character of the only slot with that role in `team.yaml`.
 5. An **alias** from `team.aliases` in `team.yaml` (these win over roles):
    ```yaml
@@ -945,7 +945,7 @@ automation:
 - **Strangers.** A rule without `sender:` reacts to *anyone* who whispers the keyword. For "only my own characters", use `sender: team`. That's what a public buff bot does, but keep `cooldown` up and stay out of combat (`when: {combat: false}`).
 - **Server rules.** Many servers forbid unattended bots. A buff bot that answers strangers while you're away is exactly what they look for. Check your server's rules first.
 - **Range and line of sight.** WoW's own rules still apply. Out of range shows the usual error on that client, and the rule doesn't retry.
-- **Text length.** Only 27 characters of a line reach WoWBox. BoxBridge starts them at your keyword when it comes later, so that's rarely a problem.
+- **Text length.** Only 27 bytes of a line reach WoWBox. With the chat filter, they're the keyword plus the 25 bytes after it, wherever the keyword is in the line, so that's rarely a problem.
 - **Channels.** A rule listens only on its channels. In a raid group, `/party` still reaches your subgroup. For lines typed in `/raid`, add `raid` to the rule's channels.
 - **Exact names.** Spell names must match the game's exactly, including your server's custom spells.
 
