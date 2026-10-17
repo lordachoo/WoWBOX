@@ -146,3 +146,31 @@ def test_words_written_for_spells_even_with_the_chat_filter_off(c):
     assert c.words_version
     c._store_rules([rule("plain")])
     assert c.words_version is None
+
+
+def test_changes_to_automation_yaml_outside_wowbox_are_never_saved_over(c):
+    from wowbox.rule_store import automation_path, dump_rules, load_rules_text
+    path = automation_path(c.cfg_path)
+    added = rule("HUNTER back off", {"slot": 4, "combat": True, "ready": "Disengage"})
+    path.write_text(dump_rules(list(c.cfg.automation) + [added]), encoding="utf-8")  # e.g. Claude adds a rule
+    c.team_command(1, "@wowbox", "rule aven")  # then you toggle another one from the game
+    names = [r.name for r in load_rules_text(path.read_text(encoding="utf-8"))]
+    assert "HUNTER back off" in names and not c.find_rule("aven")[0].enabled
+    assert "Disengage" in words.parse((Path(c.cfg.bridge.addon_dir) / "Words.lua").read_text(encoding="utf-8")).spells
+
+
+def test_a_broken_automation_yaml_is_not_saved_over(c):
+    from wowbox.rule_store import automation_path
+    path = automation_path(c.cfg_path)
+    path.write_text("automation:\n  - name: [broken\n", encoding="utf-8")
+    c.set_rule_enabled("Avenger's Shield on cooldown", False)
+    assert "broken" in path.read_text(encoding="utf-8")
+    with pytest.raises(ValueError, match="has an error"):
+        c.save_rule(None, rule("new"))
+
+
+def test_edits_on_disk_are_picked_up_by_the_refresh_timer(c):
+    from wowbox.rule_store import automation_path, dump_rules
+    automation_path(c.cfg_path).write_text(dump_rules([rule("only one")]), encoding="utf-8")
+    c._refresh()
+    assert [r.name for r in c.cfg.automation] == ["only one"] and [rt.rule.name for rt in c.engine.rules] == ["only one"]

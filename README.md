@@ -1047,6 +1047,7 @@ A live dashboard of everything rules and macros do. It updates four times a seco
 
 - `cooldown:` is the minimum time between firings. A state rule fires again at most once a second even without one, so a cast that keeps failing can't flood a client.
 - `enabled: false` keeps a rule in the file but switched off.
+- **Editing `automation.yaml` by hand** while WoWBox runs is safe: WoWBox notices within a second and loads it (the Activity tab says *automation.yaml changed on disk*), and it never saves over a newer file. If your edit has an error, WoWBox says so in the Log tab and won't save rules until it's fixed.
 - A rule that's still running its sequence won't start again (chat rules queue the request instead).
 - **Two rules on one character take turns.** When a step from one rule wants a character that another rule just used, it waits for both of these:
   - **The global cooldown:** `rule_gap` (1.5 s) after the other rule's last step there.

@@ -20,7 +20,7 @@ from .commands import TeamCommands
 from .config import AutomationRule, MacroConfig
 from .keys import parse_chord
 from .macro_store import fmt_duration, macros_path, migrate, save_macros
-from .rule_store import automation_path, migrate_rules, save_rules
+from .rule_store import automation_path, load_rules_text, migrate_rules, save_rules
 from .follow import FollowManager
 from .stack import Stacker, StackManager, StackResult, apart
 from .bridge import BridgePoller, ChatEvent, ClientState
@@ -116,6 +116,7 @@ class Controller(QObject):
                                   on_done=self.sig_stack_done.emit, boost=self.bridge.boost,
                                   moving_since=lambda: self.router.last_movement)
         self._apply_stack_cfg()
+        self._rules_stamp = self._rules_file_stamp()  # automation.yaml as last read or written (see _rules_fresh)
         # WoWBox's state in BoxBridge's in-game panel (/bb panel): spelled out on three spare keys
         self.panel = PanelLink(lambda chord, slot: self.router.send_chord(chord, [slot]), self.panel_flags,
                                self.team.slot_for_hwnd)
@@ -344,6 +345,7 @@ class Controller(QObject):
         self.chatguard.enabled = self.cfg.broadcast.chatguard
         self._auto_timer.setInterval(int(1000 / max(1.0, self.cfg.automation_options.tick_hz)))
         self.cfg.automation = cfg.automation
+        self._rules_stamp = self._rules_file_stamp()
         self.cfg.macros = cfg.macros
         self.cfg.hotkeys = cfg.hotkeys
         self.cfg.team = cfg.team
@@ -488,8 +490,37 @@ class Controller(QObject):
         self.sig_changed.emit()
 
     # ------------------------------------------------------------------ automation rules (the editor)
+    def _rules_file_stamp(self) -> tuple[int, int] | None:
+        try:
+            st = automation_path(self.cfg_path).stat()
+        except OSError:
+            return None
+        return st.st_mtime_ns, st.st_size
+
+    def _rules_fresh(self) -> bool:
+        """Pick up automation.yaml if it was changed outside WoWBox (by hand, or by Claude) since WoWBox last read
+        or wrote it, so a save never writes over those changes. False if the file has an error (then nothing may
+        be saved over it)."""
+        stamp = self._rules_file_stamp()
+        if stamp is None or stamp == self._rules_stamp:
+            return True
+        path = automation_path(self.cfg_path)
+        try:
+            rules = load_rules_text(path.read_text(encoding="utf-8"))
+        except Exception as e:
+            log.error("%s was changed and now has an error, so WoWBox won't save over it: %s", path.name, e)
+            return False
+        self._rules_stamp = stamp
+        log.info("%s changed on disk: rules reloaded", path.name)
+        self.activity.add("app", "automation", f"{path.name} changed on disk: rules reloaded", kind="info")
+        self._use_rules(rules)
+        return True
+
     def save_rule(self, old_name: str | None, rule: AutomationRule) -> None:
         """Add (old_name None) or replace a rule, write automation.yaml, and use it right away."""
+        if not self._rules_fresh():
+            raise ValueError(f"{automation_path(self.cfg_path).name} was changed outside WoWBox and has an error; "
+                             "fix it (see the Log tab) before saving")
         rules = list(self.cfg.automation)
         names = [r.name for r in rules]
         if rule.name != old_name and rule.name in names:
@@ -502,10 +533,14 @@ class Controller(QObject):
         log.info("automation rule %r saved", rule.name)
 
     def delete_rule(self, name: str) -> None:
+        if not self._rules_fresh():
+            return
         self._store_rules([r for r in self.cfg.automation if r.name != name])
         log.info("automation rule %r deleted", name)
 
     def set_rule_enabled(self, name: str, on: bool) -> None:
+        if not self._rules_fresh():
+            return
         self._store_rules([r.model_copy(update={"enabled": on}) if r.name == name else r
                            for r in self.cfg.automation])
         log.info("automation rule %r %s", name, "enabled" if on else "disabled")
@@ -525,6 +560,7 @@ class Controller(QObject):
 
     def toggle_rule(self, words: str, source: str) -> None:
         """Turn a rule on or off: `/bb rule <name>` in the game, or its hotkey."""
+        self._rules_fresh()  # find it in the file as it is now
         rule, why = self.find_rule(words) if words.strip() else (None, "say which rule: /bb rule <name>")
         if rule is None:
             log.warning("%s: %s", source, why)
@@ -537,6 +573,8 @@ class Controller(QObject):
     def set_rules_enabled(self, names: list[str], on: bool) -> None:
         """Several at once (a group's box in the Automation tab): one save."""
         wanted = set(names)
+        if not self._rules_fresh():
+            return
         self._store_rules([r.model_copy(update={"enabled": on}) if r.name in wanted else r
                            for r in self.cfg.automation])
         log.info("automation rules %s %s", ", ".join(repr(n) for n in names), "enabled" if on else "disabled")
@@ -555,6 +593,10 @@ class Controller(QObject):
         else:
             migrate_rules(self.cfg_path, rules)  # first edit: rules move out of team.yaml
             log.info("automation rules are now kept in %s (team.yaml is left as you wrote it)", path)
+        self._rules_stamp = self._rules_file_stamp()
+        self._use_rules(rules)
+
+    def _use_rules(self, rules: list[AutomationRule]) -> None:
         self.cfg.automation = rules
         self.router.set_hotkeys(self.cfg.hotkeys, self.cfg.macros, rules)
         self.engine.load(rules)
@@ -814,6 +856,7 @@ class Controller(QObject):
             self._lost.add(slot)
             self.chatguard.forget(slot)
         self._check_chat_filter(time.monotonic())
+        self._rules_fresh()  # edits to automation.yaml outside WoWBox apply within a second
 
     # ------------------------------------------------------------------ chat filter (Words.lua for BoxBridge)
     def addon_folder(self) -> Path:
