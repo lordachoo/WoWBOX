@@ -26,6 +26,8 @@ RULES = [
      "chat": {"channel": ["whisper", "party"], "contains": ["chain"], "heard_by": "Kunth"},
      "when": {"slot": "any", "casting": False, "health_pct_gte": 50.5},
      "do": {"type": "/cast Chain Heal", "to": "Kunth"}},
+    {"name": "heal-per-target", "chat": {"channel": "party", "contains": ["heal"]}, "cooldown_per": "target",
+     "cooldown": "3s", "do": {"type": "/cast [@{who}] Healing Wave", "to": "Kunth"}},
     {"name": "avenger", "when": {"slot": 1, "ready": "Avenger's Shield", "combat": True},
      "do": {"send": "Ctrl+Shift+F5", "to": "Tinkerdawn"}, "cooldown": "2s", "hotkey": "Ctrl+Alt+A", "panel": True},
 ]
@@ -51,9 +53,8 @@ def rules():
 
 
 def key(r: AutomationRule):
-    return (r.name, r.enabled, r.when and r.when.model_dump(), r.every, r.chat and r.chat.model_dump(), r.cooldown,
-            r.queue, r.priority,
-            [s.model_dump() for s in flat_steps(r.do)])
+    """Everything about a rule (a new option that isn't saved shows up here), with its steps flattened."""
+    return {**r.model_dump(exclude={"do"}), "steps": [s.model_dump() for s in flat_steps(r.do)]}
 
 
 # ---------------------------------------------------------------- storage

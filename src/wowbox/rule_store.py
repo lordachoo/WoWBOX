@@ -55,6 +55,12 @@ def rule_dict(rule: AutomationRule) -> dict:
         d["queue"] = rule.queue
     if rule.priority:
         d["priority"] = rule.priority
+    if rule.cooldown_per != "rule":
+        d["cooldown_per"] = rule.cooldown_per
+    if rule.hotkey:
+        d["hotkey"] = rule.hotkey
+    if rule.panel:
+        d["panel"] = True
     return d
 
 
