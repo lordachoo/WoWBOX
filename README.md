@@ -746,6 +746,7 @@ automation:
 - **Every other key** is a bridge field. Add `_lt`, `_lte`, `_gt`, `_gte` or `_ne` to compare.
 - **Fields:** `health_pct`, `power_pct`, `power_type`, `target_exists`, `target_hostile`, `target_dead`, `target_is_player`, `target_in_combat`, `target_health_pct`, `combat`, `resting`, `in_party`, `in_raid`, `typing`, `chat_open`, `casting`, `channeling`, `mounted`, `dead`, `ghost`, `afk`, `following`, `level`, `position_ok`, `map_x`, `map_y`, `facing`, `map_id`, `fps`.
 - **`ready: <spell>`:** that spell could be cast now: known, off its cooldown *and* the global cooldown, with enough mana or rage, and for a spell cast at your target, the target in range (*spell ready* in the editor's field list). `ready_ne` is the opposite; a list (`ready: [Holy Shield, Consecration]`) needs all of them. See *Keep a spell on cooldown* below.
+- **`dot: <spell>`:** that DoT should go on the target now: castable (as for `ready:`), and not on the target from *you*, or with less than 2 seconds left (*DoT needed* in the editor). See *Keep DoTs up* below.
 - **Who matched: `{name}`.** When the condition matches, the steps can use the character it matched:
 
   | Placeholder | Filled with |
@@ -795,6 +796,28 @@ How it works:
 - **On and off from the game:** the rule's **On/off hotkey** (`hotkey:`) or `/bb rule <name>`, where the start of the name is enough. With *Show on the in-game panel* (`panel: true`) the panel's second line says whether it's on.
 - **Why it isn't firing:** the rule's *Next* column in the Automation tab says which condition isn't true, e.g. *Holy Shield not ready* or *combat is no*.
 - The same works for any "keep it rolling" spell: Avenger's Shield, Hammer of the Righteous, a hunter's Kill Shot when it lights up.
+
+### Keep DoTs up: `dot:`
+
+A DoT has no cooldown, so `ready:` would recast it every few seconds. `dot:` asks whether *your* DoT is on the target instead. Example: the warlock (slot 2) joins the tank's fight and keeps his DoTs up:
+
+```yaml
+  - name: NEC assist                      # the tank is fighting: target its mob, send the pet
+    when: { slot: 1, combat: true, target_hostile: true }
+    do: { sequence: [ { type: /assist Tinkerdawn, to: "class:WARLOCK" }, { type: /petattack, to: "class:WARLOCK" } ] }
+    cooldown: 5s
+
+  - name: NEC corruption
+    when: { slot: 2, target_hostile: true, target_in_combat: true, dot: Corruption, casting: false, channeling: false }
+    do: { type: /cast Corruption, to: "class:WARLOCK" }
+    cooldown: 6s
+    priority: 5
+```
+
+- **One rule per DoT.** `priority:` decides which goes first when several are needed (the rules take turns, 1.5 s apart: `rule_gap`).
+- **Mine only:** another warlock's Corruption on the mob doesn't count. A DoT with less than 2 seconds left counts as gone, so it's renewed as it runs out.
+- **The debuff must have the spell's name.** If a spell's debuff is called something else on your server, the DoT never looks "on" and the rule recasts it every cooldown; `/bb words` (with a target) shows each watched DoT as *on your target*, *NEEDED* or *not castable now*.
+- **Up to 14 DoTs**, written into `Words.lua` (`dots`) like the watched spells; after adding one, `/bb all reload`.
 
 ### Timers: `every:`
 

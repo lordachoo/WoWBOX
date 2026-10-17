@@ -230,3 +230,33 @@ def test_panel_shows_its_rules_on_and_off(gs):
     tick(gs)
     line = gs.BoxBridgePanel.ruleLine.text
     assert "Avenger's Shield on cooldown ON" in line and "Buffs off" in line
+
+
+DOT_STUBS = r"""
+BoxBridgeWords.dots = { "Corruption", "Curse of Agony", "Haunt", "Splurt", "Unknown Spell" }
+CD.Corruption, CD["Curse of Agony"], CD.Haunt, CD.Splurt = { 0, 0 }, { 0, 0 }, { 50, 8 }, { 0, 0 }
+DEBUFFS = { Corruption = { 10, "player" }, ["Curse of Agony"] = { 1, "player" }, Splurt = { 30, "party1" } }
+function UnitDebuff(unit, name)  -- left: seconds left on the target; who cast it
+  local d = DEBUFFS[name]
+  if d then return name, nil, nil, 0, nil, 30, now + d[1], d[2] end
+end
+"""
+
+
+@pytest.fixture
+def gd():
+    lua = lua51.LuaRuntime(unpack_returned_tuples=True)
+    lua.execute(STUBS + PANEL_STUBS + SPELL_STUBS + DOT_STUBS)
+    for f in ("BoxBridge.lua", "BoxBridgePanel.lua"):
+        lua.execute((ADDON / f).read_text(encoding="utf-8"))
+    g = lua.globals()
+    fire(g, "PLAYER_LOGIN")
+    return g
+
+
+def test_dots_needed(gd):
+    st = state_frame(gd)
+    # Corruption: mine, 10 s left -> no. Curse of Agony: mine but 1 s left -> recast. Haunt: on cooldown -> no.
+    # Splurt: only someone else's on the target -> mine is missing. Unknown Spell: not castable -> no.
+    assert st.dot_bits == 0b01010
+    assert st.power_type == 0 and st.target_exists and not st.typing  # the bytes' own bits are untouched

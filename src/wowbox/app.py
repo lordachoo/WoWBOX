@@ -400,12 +400,12 @@ class Controller(QObject):
         self.chatguard.set_bridge(slot, st.typing and not st.stale)
         if not st.stale:
             self._count_dropped(slot, st.chat_dropped)
-        if st.ready_bits:  # which watched spells those bits are: the list this client loaded
+        if st.ready_bits or st.dot_bits:  # which watched spells and DoTs those bits are: the lists this client loaded
             f = self.chat_filters.get(st.chat_filter)
-            spells = f.spells if f else ()
-            st.ready = tuple(n.lower() for i, n in enumerate(spells) if st.ready_bits >> i & 1)
-        elif st.ready:
-            st.ready = ()
+            st.ready = tuple(n.lower() for i, n in enumerate(f.spells if f else ()) if st.ready_bits >> i & 1)
+            st.dots = tuple(n.lower() for i, n in enumerate(f.dots if f else ()) if st.dot_bits >> i & 1)
+        elif st.ready or st.dots:
+            st.ready = st.dots = ()
         c = self.team.clients.get(slot)
         if c and st.name and not st.stale and (st.name, st.class_token) != (c.character, c.class_token):
             c.character, c.class_token = st.name, st.class_token
@@ -867,7 +867,8 @@ class Controller(QObject):
         self._words_checked = time.monotonic()
         old_version, old_problem = self.words_version, self.words_problem
         rules = self.cfg.automation
-        wanted = self.cfg.bridge.chat_filter or words.spells_asked(rules) or any(r.panel for r in rules)
+        wanted = (self.cfg.bridge.chat_filter or words.spells_asked(rules) or words.spells_asked(rules, ("dot",))
+                  or any(r.panel for r in rules))
         if not (self.cfg.bridge.enabled and wanted):  # nothing for the addon to know
             self.words_version, self.words_problem = None, None
             return

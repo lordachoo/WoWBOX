@@ -148,16 +148,43 @@ end
 -- watched spells (Words.lua `spells`, what WoWBox's `ready:` conditions ask about): bit i set while spell i+1
 -- could be cast now: known, off its cooldown and the global cooldown, enough mana/rage, and (for a spell cast at
 -- your target) the target in range: a shot from too close fails without going on cooldown, so it'd stay "ready"
-local MAX_SPELLS = 7
+local MAX_SPELLS, MAX_DOTS = 7, 14
+local DOT_REFRESH = 2 -- a DoT of yours with less than this left counts as gone: cast it again
+
+local function castable(name)
+  local start, duration, enabled = GetSpellCooldown(name)
+  local ok = start and enabled == 1 and (start == 0 or duration == 0) and IsUsableSpell(name)
+  return ok and IsSpellInRange(name, "target") ~= 0 -- nil: not a spell for the target
+end
+
 local function spellsReady()
   local f = BoxBridgeWords
   if type(f) ~= "table" or type(f.spells) ~= "table" then return 0 end
   local v = 0
   for i, name in ipairs(f.spells) do
     if i > MAX_SPELLS then break end
-    local start, duration, enabled = GetSpellCooldown(name)
-    local ok = start and enabled == 1 and (start == 0 or duration == 0) and IsUsableSpell(name)
-    if ok and IsSpellInRange(name, "target") ~= 0 then v = v + 2 ^ (i - 1) end -- nil: not a spell for the target
+    if castable(name) then v = v + 2 ^ (i - 1) end
+  end
+  return v
+end
+
+-- is my `name` on the target, with more than DOT_REFRESH seconds left?
+local function myDot(name)
+  local _, _, _, _, _, _, expires, caster = UnitDebuff("target", name, nil, "PLAYER")
+  if not expires then return false end
+  if caster and caster ~= "player" then return false end
+  return expires == 0 or expires - GetTime() > DOT_REFRESH
+end
+
+-- watched DoTs (Words.lua `dots`, what WoWBox's `dot:` conditions ask about): bit i set while DoT i+1 should go on
+-- the target now: castable (as above) and not on the target from you, or about to run out
+local function dotsNeeded()
+  local f = BoxBridgeWords
+  if type(f) ~= "table" or type(f.dots) ~= "table" or not UnitExists("target") then return 0 end
+  local v = 0
+  for i, name in ipairs(f.dots) do
+    if i > MAX_DOTS then break end
+    if castable(name) and not myDot(name) then v = v + 2 ^ (i - 1) end
   end
   return v
 end
@@ -261,15 +288,15 @@ local function snapshot()
   local level = UnitLevel("player") or 0
   if level < 0 then level = 0 elseif level > 255 then level = 255 end
   local _, classToken = UnitClass("player")
-  local ready = spellsReady()
+  local ready, dots = spellsReady(), dotsNeeded()
   local d = {
     MAGIC_A, MAGIC_B, counter,
-    pct("player"), powerPct("player"), UnitPowerType("player") or 0,
+    pct("player"), powerPct("player"), (UnitPowerType("player") or 0) % 8 + math.floor(dots / 512) * 8,
     tExists and pct("target") or 0,
     bits(tExists, tExists and UnitCanAttack("player", "target"), tExists and UnitIsDead("target"),
-      tExists and UnitIsPlayer("target"), tExists and UnitAffectingCombat("target")),
+      tExists and UnitIsPlayer("target"), tExists and UnitAffectingCombat("target")) + (dots % 8) * 32,
     bits(UnitAffectingCombat("player"), IsResting(), inParty, inRaid) + (ready % 16) * 16,
-    inputFlags(),
+    inputFlags() + (math.floor(dots / 8) % 64) * 4,
     bits(casting, channeling) + filterVersion() * 4,
     bits(IsMounted(), UnitIsDead("player"), UnitIsGhost("player"), UnitIsAFK("player"), following)
       + math.floor(ready / 16) * 32,
@@ -432,6 +459,13 @@ SlashCmdList["BOXBRIDGE"] = function(msg)
         local r = spellsReady()
         for i, name in ipairs(BoxBridgeWords.spells) do
           p("  watched spell: " .. name .. (math.floor(r / 2 ^ (i - 1)) % 2 == 1 and " (ready)" or " (not ready)"))
+        end
+      end
+      if type(BoxBridgeWords.dots) == "table" then
+        for _, name in ipairs(BoxBridgeWords.dots) do
+          local why = not UnitExists("target") and "no target" or myDot(name) and "on your target"
+            or not castable(name) and "not castable now (cooldown, mana, range or unknown)" or "NEEDED"
+          p("  watched DoT: " .. name .. " (" .. why .. ")")
         end
       end
     end

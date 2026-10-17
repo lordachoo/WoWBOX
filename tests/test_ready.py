@@ -174,3 +174,34 @@ def test_edits_on_disk_are_picked_up_by_the_refresh_timer(c):
     automation_path(c.cfg_path).write_text(dump_rules([rule("only one")]), encoding="utf-8")
     c._refresh()
     assert [r.name for r in c.cfg.automation] == ["only one"] and [rt.rule.name for rt in c.engine.rules] == ["only one"]
+
+
+# ---------------------------------------------------------------- DoTs: `dot:`
+def test_dot_bits_ride_in_spare_bits():
+    values = {"power_type": 3, "target_flags": 0b10011, "input_flags": 0b11, "dot_bits": 0b10110_011010_101}
+    strip = encode(values, 3, 8)
+    img = np.full((strip.shape[0] + 10, strip.shape[1] + 40, 3), 37, dtype=np.uint8)
+    img[: strip.shape[0], : strip.shape[1]] = strip
+    st = decode(img)
+    assert st.dot_bits == 0b10110_011010_101 and st.power_type == 3
+    assert (st.target_exists, st.target_hostile, st.target_dead, st.target_in_combat) == (True, True, False, True)
+    assert st.typing and st.chat_open
+
+
+def test_dots_list_and_condition():
+    rules = [rule("corr", {"slot": 2, "dot": "Corruption"}), rule("coa", {"slot": 2, "dot": ["Curse of Agony"]}),
+             AVENGER]
+    f = words.build(rules)
+    assert f.dots == ("Corruption", "Curse of Agony") and f.spells == ("Avenger's Shield",)
+    assert words.parse(words.lua(f, 3)) == f
+    cond = Condition.model_validate({"slot": 2, "dot": "Corruption"})
+    assert condition_report(cond, {2: ClientState(dots=("corruption",))})[0]
+    ok, per = condition_report(cond, {2: ClientState()})
+    assert not ok and "not needed" in per[0][2]
+
+
+def test_bridge_state_gets_dot_names(c):
+    c._store_rules(list(c.cfg.automation) + [rule("corr", {"slot": 2, "dot": "Corruption"})])
+    st = ClientState(chat_filter=c.words_version, dot_bits=1)
+    c._on_bridge_state(2, st)
+    assert st.dots == ("corruption",) and st.ready == ()

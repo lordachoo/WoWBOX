@@ -43,6 +43,7 @@ FIELDS = [
     ("position_ok", "has map coordinates", "bool"),
     ("fps", "frames per second", "number"),
     ("ready", "spell ready (can be cast now; = a spell name, e.g. Avenger's Shield)", "text"),
+    ("dot", "DoT needed (castable, and not on the target from you; = a spell name, e.g. Corruption)", "text"),
 ]
 FIELD_KIND = {f: k for f, _, k in FIELDS}
 OPS = [("=", ""), ("≠", "_ne"), ("<", "_lt"), ("≤", "_lte"), (">", "_gt"), ("≥", "_gte")]

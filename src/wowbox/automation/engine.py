@@ -77,8 +77,9 @@ def _not_ready(have: tuple[str, ...], want: object) -> bool:
 def compile_condition(cond: Condition) -> list[tuple[str, Callable[[object, object], bool], object]]:
     preds = []
     for key, value in (cond.model_extra or {}).items():
-        if key in ("ready", "ready_ne"):
-            preds.append(("ready", _ready if key == "ready" else _not_ready, value))
+        if key in ("ready", "ready_ne", "dot", "dot_ne"):  # names in a list the bridge reports
+            fld = key.removesuffix("_ne")
+            preds.append((fld + "s" if fld == "dot" else fld, _not_ready if key.endswith("_ne") else _ready, value))
             continue
         op_fn, fld = operator.eq, key
         for suffix, fn in OPS.items():
@@ -127,6 +128,9 @@ def condition_report(cond: Condition, states: dict[int, ClientState | None], pre
             fld, fn, val = failed
             if fld == "ready":
                 per.append((slot, False, f"{_show(val)} {'not ready' if fn is _ready else 'ready'}"))
+            elif fld == "dots":
+                why = "not needed (on the target, or not castable)" if fn is _ready else "needed"
+                per.append((slot, False, f"{_show(val)} {why}"))
             else:
                 per.append((slot, False, f"{fld} is {_show(getattr(st, fld))}, needs {OP_WORDS.get(fn, '?')} "
                                          f"{_show(val)}"))
