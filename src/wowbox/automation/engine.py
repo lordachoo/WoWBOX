@@ -775,9 +775,25 @@ class AutomationEngine:
                     if len(alive) < len(slots):
                         to = alive  # leave the dead out
                         slots = alive
+                waited = rt.running_step == 0 and rt.last_fired is not None and rt.resume_at > rt.last_fired
+                before = {s: self._slot_last.get(s) for s in slots}
                 later = self._turn(rt, slots, now)
                 if later > now:
                     rt.resume_at = later  # another rule's cast or global cooldown on that character first
+                    return
+                if waited and rt.rule.when is not None and rt.rule.chat is None \
+                        and not self._check(rt, self.source.states())[0]:
+                    # it waited its turn: only go if the condition still holds. A DoT queued behind nine others
+                    # must not be cast once the mob is dead (the game then picks the nearest mob for it, and the
+                    # pet runs after that one)
+                    for s, last in before.items():  # it sent nothing: the next rule needn't wait for it
+                        if last is None:
+                            self._slot_last.pop(s, None)
+                        else:
+                            self._slot_last[s] = last
+                    rt.running_step = rt.run_steps = rt.current_sender = None
+                    self._release(rt)
+                    self._event(f"  dropped {describe(steps)}: condition no longer true", slots)
                     return
             rt.running_step += 1
             if isinstance(step, WaitStep):

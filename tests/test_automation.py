@@ -162,3 +162,35 @@ def test_a_claim_left_by_a_rule_that_stopped_waiting_blocks_nothing():
     e._claims[3] = ("dot", 10)  # stale: "dot" isn't waiting (its condition is false)
     e.tick(6)
     assert sender.sent == [("F2", [3])] * 2
+
+
+def test_a_rule_that_waited_its_turn_is_dropped_if_its_condition_is_gone():
+    # ten DoTs fire together and go out 1.5 s apart: one still queued when the mob dies must not be cast (the game
+    # would pick the nearest mob for it)
+    first = {"name": "first", "when": {"slot": 3, "power_pct_gt": 50}, "do": {"send": "F1", "to": [3]},
+             "cooldown": "1m", "priority": 5}
+    second = {"name": "second", "when": {"slot": 3, "power_pct_gt": 50, "combat": False},
+              "do": {"send": "F2", "to": [3]}, "cooldown": "1m"}
+    e, sender, src = engine([first, second], rule_gap=1.5)
+    e.tick(0)
+    assert sender.sent == [("F1", [3])]  # "second" waits for the global cooldown
+    src.st[3] = ClientState(power_pct=80, combat=True)  # its condition is gone before its turn
+    e.tick(2)
+    assert sender.sent == [("F1", [3])]
+    src.st[3] = ClientState(power_pct=80)
+    e.tick(3)  # nothing waits for the dropped one: it fires again once its condition holds (after its cooldown)
+    assert sender.sent == [("F1", [3])]
+    e.tick(61)
+    e.tick(63)  # after "first" again, then the global cooldown
+    assert sender.sent[-1] == ("F2", [3])
+
+
+def test_a_rule_that_waited_its_turn_still_goes_if_its_condition_holds():
+    first = {"name": "first", "when": {"slot": 3, "power_pct_gt": 50}, "do": {"send": "F1", "to": [3]},
+             "cooldown": "1m", "priority": 5}
+    second = {"name": "second", "when": {"slot": 3, "power_pct_gt": 50}, "do": {"send": "F2", "to": [3]},
+              "cooldown": "1m"}
+    e, sender, _ = engine([first, second], rule_gap=1.5)
+    e.tick(0)
+    e.tick(2)
+    assert sender.sent == [("F1", [3]), ("F2", [3])]

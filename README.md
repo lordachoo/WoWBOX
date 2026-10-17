@@ -840,6 +840,8 @@ A DoT has no cooldown, so `ready:` would recast it every few seconds. `dot:` ask
 ```
 
 - **Add it to every rule that attacks** (pet, shots, DoTs). The Next column says why one waits: *not Tinkerdawn's target*, *Tinkerdawn has no target*, *no target*.
+- **Guard the casts themselves: `/cast [harm,nodead] Corruption`** (quote it in YAML: `type: '/cast [harm,nodead] Corruption'`; also `'/petattack [harm,nodead]'`). Cast with no live hostile target, a spell makes the game pick the nearest mob, and the pet runs after it; with `[harm,nodead]` the game casts nothing instead.
+- **A rule that waited its turn is checked again.** When ten DoT rules fire together they go out one by one (`rule_gap`). Each state rule's condition is checked again when its turn comes, and dropped if it no longer holds (the mob died meanwhile); the Activity tab says *dropped ...: condition no longer true*.
 - **`target_dead: false`:** a corpse stays hostile, and "in combat" for a few seconds, and the tank often keeps it targeted. Without this the rules keep casting at it.
 - **Distance: `target_range`.** The game measures how far the target really is, in steps: `10` (within about 10 yards), `28` (about 28), `100` (farther, or no target). `target_range_lte: 10` keeps the pet home unless the mob is close. Don't use `ready:` as a range check for this: the game's spell range check doesn't know about every aura (on EQWOW an aura that shortens a warlock's spell range still reports *in range* at full range); `/bb words` shows the distance and what the game says.
 - **Every client needs BoxBridge 1.4.** An older one reports no target, so `same_target` is never true there and those rules wait. `/bb words` shows the target's id: two characters on the same mob show the same number.
