@@ -87,6 +87,7 @@ class Controller(QObject):
         self.router = Router(self.team, RouteTable(cfg.routes), input_api, windows, self.chatguard, cfg.broadcast,
                              cfg.hotkeys, on_hotkey=self.sig_hotkey.emit, macros=cfg.macros)
         self.router.on_state_change = self.sig_changed.emit
+        self.router.set_hotkeys(cfg.hotkeys, cfg.macros, cfg.automation)  # rules' hotkeys too
         self.follow = FollowManager(cfg.follow, self.team, self.router, on_change=self.sig_changed.emit)
         self.chatguard.on_change = lambda _open: self.sig_changed.emit()
 
@@ -354,7 +355,7 @@ class Controller(QObject):
         self._apply_stack_cfg()
         self.team.reload(cfg)
         self.router.routes = RouteTable(cfg.routes)
-        self.router.set_hotkeys(cfg.hotkeys, cfg.macros)
+        self.router.set_hotkeys(cfg.hotkeys, cfg.macros, cfg.automation)
         self.macros.load(cfg.macros)
         self.chatguard.open_keys = self._chords(cfg.broadcast.chatguard_open_keys)
         self.chatguard.close_keys = self._chords(cfg.broadcast.chatguard_close_keys)
@@ -387,6 +388,8 @@ class Controller(QObject):
             self.follow.toggle_mirror()
         elif name.startswith("macro:"):
             self.macros.toggle(name.split(":", 1)[1])
+        elif name.startswith("rule:"):
+            self.toggle_rule(name.split(":", 1)[1], "hotkey")
         elif name.startswith("focus_slot:"):
             self.layout.set_main(int(name.split(":")[1]))
         self.sig_changed.emit()
@@ -395,6 +398,12 @@ class Controller(QObject):
         self.chatguard.set_bridge(slot, st.typing and not st.stale)
         if not st.stale:
             self._count_dropped(slot, st.chat_dropped)
+        if st.ready_bits:  # which watched spells those bits are: the list this client loaded
+            f = self.chat_filters.get(st.chat_filter)
+            spells = f.spells if f else ()
+            st.ready = tuple(n.lower() for i, n in enumerate(spells) if st.ready_bits >> i & 1)
+        elif st.ready:
+            st.ready = ()
         c = self.team.clients.get(slot)
         if c and st.name and not st.stale and (st.name, st.class_token) != (c.character, c.class_token):
             c.character, c.class_token = st.name, st.class_token
@@ -424,15 +433,19 @@ class Controller(QObject):
         return out
 
     # ------------------------------------------------------------------ macros (the editor)
-    def macro_hotkey_owner(self, key: str, ignore_macro: str | None = None) -> str | None:
-        """Who already uses hotkey `key` (another macro or a WoWBox hotkey), or None."""
+    def macro_hotkey_owner(self, key: str, ignore_macro: str | None = None, ignore_rule: str | None = None
+                           ) -> str | None:
+        """Who already uses hotkey `key` (a macro, a rule or a WoWBox hotkey), or None."""
         try:
             owner = self.router.hotkey_owner(parse_chord(key))
         except ValueError:
             return None
-        if owner is None or owner == f"macro:{ignore_macro}":
+        if owner is None or owner in (f"macro:{ignore_macro}", f"rule:{ignore_rule}"):
             return None
-        return f"macro {owner.split(':', 1)[1]!r}" if owner.startswith("macro:") else f"the WoWBox {owner} hotkey"
+        kind, _, name = owner.partition(":")
+        if kind in ("macro", "rule"):
+            return f"{kind} {name!r}"
+        return f"the WoWBox {owner} hotkey"
 
     def target_choices(self) -> list[str]:
         out = ["all", "followers", "leader", "not:leader", "active"]
@@ -468,7 +481,7 @@ class Controller(QObject):
             migrate(self.cfg_path, macros)  # first edit: macros move out of team.yaml
             log.info("macros are now kept in %s (team.yaml is left as you wrote it)", path)
         self.cfg.macros = macros
-        self.router.set_hotkeys(self.cfg.hotkeys, macros)
+        self.router.set_hotkeys(self.cfg.hotkeys, macros, self.cfg.automation)
         self.macros.load(macros)
         if hasattr(self, "window"):
             self.window.load_macros()
@@ -497,6 +510,30 @@ class Controller(QObject):
                            for r in self.cfg.automation])
         log.info("automation rule %r %s", name, "enabled" if on else "disabled")
 
+    def find_rule(self, words: str) -> tuple[AutomationRule | None, str]:
+        """The rule `/bb rule <words>` means: its exact name, or the only one starting with (or else containing)
+        the words, any case. (None, why) when there's none or more than one."""
+        want = words.strip().lower()
+        rules = self.cfg.automation
+        for test in (lambda n: n == want, lambda n: n.startswith(want), lambda n: want in n):
+            hits = [r for r in rules if test(r.name.lower())]
+            if len(hits) == 1:
+                return hits[0], ""
+            if len(hits) > 1:
+                return None, f"{len(hits)} rules match {words!r}: " + ", ".join(r.name for r in hits[:4])
+        return None, f"no rule matches {words!r}"
+
+    def toggle_rule(self, words: str, source: str) -> None:
+        """Turn a rule on or off: `/bb rule <name>` in the game, or its hotkey."""
+        rule, why = self.find_rule(words) if words.strip() else (None, "say which rule: /bb rule <name>")
+        if rule is None:
+            log.warning("%s: %s", source, why)
+            self.activity.add("/bb", source, why, kind="skipped")
+            return
+        self.set_rule_enabled(rule.name, not rule.enabled)
+        self.activity.add("/bb", source, f"rule {rule.name!r} turned {'ON' if not rule.enabled else 'OFF'}",
+                          kind="fired")
+
     def set_rules_enabled(self, names: list[str], on: bool) -> None:
         """Several at once (a group's box in the Automation tab): one save."""
         wanted = set(names)
@@ -519,6 +556,7 @@ class Controller(QObject):
             migrate_rules(self.cfg_path, rules)  # first edit: rules move out of team.yaml
             log.info("automation rules are now kept in %s (team.yaml is left as you wrote it)", path)
         self.cfg.automation = rules
+        self.router.set_hotkeys(self.cfg.hotkeys, self.cfg.macros, rules)
         self.engine.load(rules)
         self.sync_chat_filter()
         if hasattr(self, "window"):
@@ -682,6 +720,9 @@ class Controller(QObject):
             self.follow.stay()
         elif action == "mirror":
             self.follow.toggle_mirror()
+        elif action.startswith("rule"):
+            self.toggle_rule(action[4:], f"/bb rule from {self.team.clients[origin].name}"
+                             if origin in self.team.clients else "/bb rule")
         else:
             log.warning("/bb %s: unknown WoWBox action", action)
         self.sig_changed.emit()
@@ -782,7 +823,9 @@ class Controller(QObject):
         """Write Words.lua from the chat rules (only when they changed what it says)."""
         self._words_checked = time.monotonic()
         old_version, old_problem = self.words_version, self.words_problem
-        if not (self.cfg.bridge.enabled and self.cfg.bridge.chat_filter):
+        rules = self.cfg.automation
+        wanted = self.cfg.bridge.chat_filter or words.spells_asked(rules) or any(r.panel for r in rules)
+        if not (self.cfg.bridge.enabled and wanted):  # nothing for the addon to know
             self.words_version, self.words_problem = None, None
             return
         folder = self.addon_folder()
@@ -793,7 +836,8 @@ class Controller(QObject):
             self.words_version, self.words_problem = None, problem
             return
         try:
-            version, changed = words.sync(folder, words.build(self.cfg.automation), self.chat_filters)
+            version, changed = words.sync(folder, words.build(rules, chat=self.cfg.bridge.chat_filter),
+                                          self.chat_filters)
         except OSError as e:
             if str(e) != self.words_problem:
                 log.warning("chat filter not written: %s", e)
@@ -903,9 +947,15 @@ class Controller(QObject):
     def panel_flags(self) -> dict[str, bool]:
         """What the in-game panel's title line shows (see panel.py)."""
         e = self.engine
-        return {"broadcast": self.router.enabled, "automation": e.enabled, "dry_run": e.dry_run,
-                "paused": bool(e.paused_reason or (e.enabled and e.blocked)), "follow": self.follow.active,
-                "mirror": self.router.mirror}
+        flags = {"broadcast": self.router.enabled, "automation": e.enabled, "dry_run": e.dry_run,
+                 "paused": bool(e.paused_reason or (e.enabled and e.blocked)), "follow": self.follow.active,
+                 "mirror": self.router.mirror}
+        # the rules on the panel (`panel: true`), in the order Words.lua lists them
+        f = self.chat_filters.get(self.words_version) if self.words_version else None
+        enabled = {r.name: r.enabled for r in self.cfg.automation}
+        for i, name in enumerate(f.panel if f else ()):
+            flags[f"rule{i + 1}"] = enabled.get(name, False)
+        return flags
 
     def _panel_tick(self) -> None:
         if self.cfg.broadcast.modifier_mode == "post":  # the panel keys are Ctrl+Alt+Shift chords

@@ -60,9 +60,23 @@ def _rules(names: list[str]) -> str:
     return f"{len(names)} rules ({shown})"
 
 
+def _ready(have: tuple[str, ...], want: object) -> bool:
+    """`ready: Avenger's Shield`: that watched spell can be cast now (any case; a list: all of them)."""
+    names = [want] if isinstance(want, str) else list(want or [])
+    return all(str(n).strip().lower() in have for n in names)
+
+
+def _not_ready(have: tuple[str, ...], want: object) -> bool:
+    names = [want] if isinstance(want, str) else list(want or [])
+    return not any(str(n).strip().lower() in have for n in names)
+
+
 def compile_condition(cond: Condition) -> list[tuple[str, Callable[[object, object], bool], object]]:
     preds = []
     for key, value in (cond.model_extra or {}).items():
+        if key in ("ready", "ready_ne"):
+            preds.append(("ready", _ready if key == "ready" else _not_ready, value))
+            continue
         op_fn, fld = operator.eq, key
         for suffix, fn in OPS.items():
             if key.endswith(suffix) and key[: -len(suffix)] in STATE_FIELDS:
@@ -108,7 +122,11 @@ def condition_report(cond: Condition, states: dict[int, ClientState | None], pre
             per.append((slot, True, ""))
         else:
             fld, fn, val = failed
-            per.append((slot, False, f"{fld} is {_show(getattr(st, fld))}, needs {OP_WORDS.get(fn, '?')} {_show(val)}"))
+            if fld == "ready":
+                per.append((slot, False, f"{_show(val)} {'not ready' if fn is _ready else 'ready'}"))
+            else:
+                per.append((slot, False, f"{fld} is {_show(getattr(st, fld))}, needs {OP_WORDS.get(fn, '?')} "
+                                         f"{_show(val)}"))
     if not per:
         return False, per
     hits = [ok for _, ok, _ in per]

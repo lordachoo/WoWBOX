@@ -1,5 +1,7 @@
 """WoWBox's state on BoxBridge's in-game panel: three spare keys, answered through the bridge."""
-from wowbox.panel import KEYS, MAX_TRIES, RETRY_AFTER, PanelLink, encode, presses
+from wowbox.panel import FLAGS, KEYS, MAX_TRIES, RETRY_AFTER, PanelLink, encode, presses
+
+N = len(FLAGS) + 1  # presses per state: start + one per flag
 
 from conftest import Clock
 
@@ -8,7 +10,8 @@ def test_encode_and_presses():
     bits = encode({"broadcast": True, "automation": True, "follow": True})
     assert bits == 0b010011
     start, zero, one = KEYS
-    assert presses(bits) == [start, one, one, zero, zero, one, zero]
+    assert presses(bits) == [start, one, one, zero, zero, one, zero] + [zero] * 8
+    assert encode({"rule1": True}) == 1 << 6
 
 
 class Rig:
@@ -30,7 +33,7 @@ def test_only_panels_get_the_state_and_only_when_it_changes():
     r.link.tick()
     assert r.take() == []  # nobody showed a panel
     r.link.on_command(0x100, " on")
-    assert [s for s, _ in r.take()] == [1] * 7
+    assert [s for s, _ in r.take()] == [1] * N
     r.link.on_command(0x100, " 1")  # the addon got it
     r.clock.t += 60
     r.link.tick()
@@ -49,13 +52,13 @@ def test_lost_presses_are_sent_again_a_few_times():
     for _ in range(MAX_TRIES - 1):
         r.clock.t += RETRY_AFTER
         r.link.tick()
-        assert len(r.take()) == 7
+        assert len(r.take()) == N
     r.clock.t += RETRY_AFTER
     r.link.tick()
     assert r.take() == []  # gave up on this state...
     r.flags = {}
     r.link.tick()
-    assert len(r.take()) == 7  # ...but not on the next one
+    assert len(r.take()) == N  # ...but not on the next one
 
 
 def test_wrong_answer_resends_and_on_starts_over():
@@ -64,10 +67,10 @@ def test_wrong_answer_resends_and_on_starts_over():
     r.take()
     r.clock.t += RETRY_AFTER
     r.link.on_command(0x100, "5")  # garbled
-    assert len(r.take()) == 7
+    assert len(r.take()) == N
     r.link.on_command(0x100, "1")
     r.link.on_command(0x100, "on")  # /reload: it knows nothing again
-    assert len(r.take()) == 7
+    assert len(r.take()) == N
 
 
 def test_panel_off_and_closed_windows():
@@ -91,7 +94,7 @@ def test_controller_handles_panel_commands_quietly(tmp_path):
     before = len(c.activity.items())
     assert c.team_command(1, "@wowbox", "panel on") == []
     c._panel_tick()
-    assert [t for t, _ in sent] == [(1,)] * 7
+    assert [t for t, _ in sent] == [(1,)] * N
     assert len(c.activity.items()) == before  # not in the Activity tab: it answers every change
     assert c.panel_flags()["broadcast"] == c.router.enabled
 

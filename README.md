@@ -141,6 +141,7 @@ All in-game commands (`/bb` is short for `/boxbridge`):
 | `/bb stack` | Everyone walks onto *your* spot and facing (the client you typed it in). |
 | `/bb follow`, `/bb stay` | Follow mode on / off. |
 | `/bb mirror` | Movement mirroring on / off. |
+| `/bb rule <name>` | Turn a WoWBox automation rule on or off. The start of its name is enough: `/bb rule aven`. |
 | `/bb panel` | Show or hide the party panel on this character (see below). `/bb panel alert` turns the follow warning on or off; `/bb panel reset` puts the panel back in its default place. |
 | `/bb` | Turn the strip on or off. |
 | `/bb status` | Show the current settings. |
@@ -165,6 +166,7 @@ WoWBox: BROADCAST ON  AUTO  FOLLOW
  Tinkerbow not following          ███  77%  ██ 90%  drinking
 ```
 
+- **Second line: your rules** marked *Show on the in-game panel* (`panel: true`), each *ON* in green or *off* in grey. Turn them on and off with `/bb rule <name>` or their hotkey.
 - **Title line: WoWBox's own state.** Broadcast on or off, automation (with *dry run*), *rules PAUSED* (a client's bridge can't be read), follow mode, mirroring. It changes when the state does. Until WoWBox has sent it: *no state yet*.
 - **Follow:** who each character is following, or *not following* in orange. When someone stops following, the panel waits 2 seconds (follow mode re-follows by itself), then **warns**: a raid warning (*Kunth stopped following*), a sound and a flashing row. No warning when WoWBox's follow mode is off (you told them to stay), or for the dead. `/bb panel alert` turns it off.
 - **Casting:** the spell, its target and a cast bar. When an automation types `/cast [@Gnope] Healing Wave` into Kunth, you see *Healing Wave > Gnope* at once. Instant casts show for a moment; failed or interrupted casts say *(failed)*.
@@ -172,7 +174,7 @@ WoWBox: BROADCAST ON  AUTO  FOLLOW
 
 How it gets there:
 - **The party's own information** comes from each client's BoxBridge, in hidden addon messages to the party (nothing in chat). So every client needs BoxBridge 1.3 for its follow and cast targets to show; health, mana and casting come from the game for everyone.
-- **WoWBox's state** can only reach the game as key presses: WoWBox spells it out on three spare keys BoxBridge binds, **Ctrl+Alt+Shift+F7, F8 and F9**, sent only to clients showing the panel and only when the state changes (seven presses). The panel answers through the bridge with what it got, so presses lost while you were typing there are sent again. Don't bind those keys to anything else. This needs `broadcast.modifier_mode: post` (the default); with the other modes the title line stays at *no state yet*.
+- **WoWBox's state** can only reach the game as key presses: WoWBox spells it out on three spare keys BoxBridge binds, **Ctrl+Alt+Shift+F7, F8 and F9**, sent only to clients showing the panel and only when the state changes (15 presses). The panel answers through the bridge with what it got, so presses lost while you were typing there are sent again. Don't bind those keys to anything else. This needs `broadcast.modifier_mode: post` (the default); with the other modes the title line stays at *no state yet*.
 
 ### The chat filter (`Words.lua`)
 
@@ -743,6 +745,7 @@ automation:
 - **`slot`:** a number, a list, `any` (the default) or `all`.
 - **Every other key** is a bridge field. Add `_lt`, `_lte`, `_gt`, `_gte` or `_ne` to compare.
 - **Fields:** `health_pct`, `power_pct`, `power_type`, `target_exists`, `target_hostile`, `target_dead`, `target_is_player`, `target_in_combat`, `target_health_pct`, `combat`, `resting`, `in_party`, `in_raid`, `typing`, `chat_open`, `casting`, `channeling`, `mounted`, `dead`, `ghost`, `afk`, `following`, `level`, `position_ok`, `map_x`, `map_y`, `facing`, `map_id`, `fps`.
+- **`ready: <spell>`:** that spell could be cast now: known, off its cooldown *and* the global cooldown, with enough mana or rage (*spell ready* in the editor's field list). `ready_ne` is the opposite; a list (`ready: [Holy Shield, Avenger's Shield]`) needs all of them. See *Keep a spell on cooldown* below.
 - **Who matched: `{name}`.** When the condition matches, the steps can use the character it matched:
 
   | Placeholder | Filled with |
@@ -762,6 +765,26 @@ automation:
   The same placeholders work in a chat rule that also has a `when:`.
 - **Only characters near the action count** (`skip_far`, on by default). A character in another zone, or farther than `follow.mirror_max_distance_yards` (40 yd) from every character the rule acts on, is ignored by that rule's condition. Someone hurt in another zone doesn't make Kunth chain-heal forever. The Next column says so, e.g. *Gnope too far from Kunth: in another zone*. Inside instances without map coordinates only the zone is compared.
 - **Dead characters don't count either** (`skip_dead`), unless the condition asks about `dead` itself.
+
+### Keep a spell on cooldown: `ready:`
+
+For "cast Avenger's Shield every time it's ready", ask the bridge whether the spell is ready instead of guessing with a timer:
+
+```yaml
+  - name: Avenger's Shield on cooldown
+    enabled: false                       # off until a big fight: /bb rule aven, or the hotkey
+    when: { slot: 1, ready: "Avenger's Shield", combat: true, target_hostile: true, casting: false }
+    do: { send: "Ctrl+Shift+F5", to: Tinkerdawn }   # the shield bound to Ctrl+Shift+F5 in WoW
+    cooldown: 2s
+    hotkey: Ctrl+Alt+A                   # on/off
+    panel: true                          # the in-game panel says whether it's on
+```
+
+- **How it knows:** WoWBox writes the spells your enabled rules ask about into `Words.lua` (`spells`, up to 7), and BoxBridge reports which of them could be cast now, about 10 times a second. After adding or changing a `ready:` spell, `/bb all reload` (the banner reminds you, as for chat words). Until the client has loaded the new list, the condition is false. `/bb words` lists the watched spells and whether each is ready.
+- **The spell's name** as the game spells it; any case.
+- **Press a key, don't type:** bind the spell to a spare key in WoW and `send:` it. One key press doesn't open the chat box in the window you're playing, and like every automation step it waits while you're holding keys there.
+- **Turning it on and off from the game:** `/bb rule <name>` (the start of the name is enough: `/bb rule aven`) or the rule's **On/off hotkey** (`hotkey:`, in the editor). With *Show on the in-game panel* (`panel: true`) the panel's second line says whether it's on.
+- The same works for any "keep it rolling" spell: Holy Shield, Hammer of the Righteous, a hunter's Kill Shot when it lights up.
 
 ### Timers: `every:`
 
@@ -1020,6 +1043,8 @@ A live dashboard of everything rules and macros do. It updates four times a seco
   - **The current cast:** the cast or channel in progress (a 2.5 s Chain Heal, Drain Soul) has finished, as read from the bridge. A stuck flag holds it for at most `cast_wait_max` (10 s).
 
   A totem or heal request in the middle of a chain-heal loop goes out as soon as the current Chain Heal lands. The loop then continues after it. A rule's own steps never wait for its own casts: its *Then wait* gaps handle that. Set `rule_gap: 0` and `wait_for_casts: false` to turn this off.
+- **On/off hotkey** (`hotkey:`, the editor's *On/off hotkey*): a key that turns the rule on or off while WoW or WoWBox has focus. **`/bb rule <name>`** in the game does the same for any rule (the start of its name is enough; if it fits several, nothing changes and the Activity tab says which).
+- **Show on the in-game panel** (`panel: true`): the party panel's second line shows the rule and whether it's on (up to 8 rules).
 - **Priority** (`priority:`, the editor's *Priority* box, default 0) decides who goes first when several rules wait for the same character: higher first, equal = first come, first served. Give totems `priority: 10` and they jump ahead of a waiting heal. It doesn't interrupt a cast already in progress.
 - **Dead characters are left alone** (`skip_dead`, on by default):
   - A dead character or ghost never matches a condition, so `health_pct < 70` doesn't fire forever for a dead team.

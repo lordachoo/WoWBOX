@@ -18,6 +18,7 @@
 --   /bb stack               everyone walks onto your spot and facing
 --   /bb follow | stay       follow mode on (everyone follows the leader) / off
 --   /bb mirror              movement mirroring on/off
+--   /bb rule <name>         turn a WoWBox automation rule on/off (the start of its name is enough)
 -- The party panel (BoxBridgePanel.lua):
 --   /bb panel               show/hide it on this character: who follows whom, who casts what on whom, HP/mana
 --   /bb panel alert         sound + warning when someone stops following (on/off)
@@ -144,6 +145,21 @@ local function wanted(channel, text)
   return true, at, len, index
 end
 
+-- watched spells (Words.lua `spells`, what WoWBox's `ready:` conditions ask about): bit i set while spell i+1
+-- could be cast now: known, off its cooldown and the global cooldown, enough mana/rage
+local MAX_SPELLS = 7
+local function spellsReady()
+  local f = BoxBridgeWords
+  if type(f) ~= "table" or type(f.spells) ~= "table" then return 0 end
+  local v = 0
+  for i, name in ipairs(f.spells) do
+    if i > MAX_SPELLS then break end
+    local start, duration, enabled = GetSpellCooldown(name)
+    if start and enabled == 1 and (start == 0 or duration == 0) and IsUsableSpell(name) then v = v + 2 ^ (i - 1) end
+  end
+  return v
+end
+
 -- a matched word is sent as 2 bytes (KEYWORD, its number in the list) followed by the text after it, so what
 -- follows it (a name, an item) gets all of the 27 bytes WoWBox sees; WoWBox puts the word back
 local KEYWORD = 1
@@ -243,16 +259,18 @@ local function snapshot()
   local level = UnitLevel("player") or 0
   if level < 0 then level = 0 elseif level > 255 then level = 255 end
   local _, classToken = UnitClass("player")
+  local ready = spellsReady()
   local d = {
     MAGIC_A, MAGIC_B, counter,
     pct("player"), powerPct("player"), UnitPowerType("player") or 0,
     tExists and pct("target") or 0,
     bits(tExists, tExists and UnitCanAttack("player", "target"), tExists and UnitIsDead("target"),
       tExists and UnitIsPlayer("target"), tExists and UnitAffectingCombat("target")),
-    bits(UnitAffectingCombat("player"), IsResting(), inParty, inRaid),
+    bits(UnitAffectingCombat("player"), IsResting(), inParty, inRaid) + (ready % 16) * 16,
     inputFlags(),
     bits(casting, channeling) + filterVersion() * 4,
-    bits(IsMounted(), UnitIsDead("player"), UnitIsGhost("player"), UnitIsAFK("player"), following),
+    bits(IsMounted(), UnitIsDead("player"), UnitIsGhost("player"), UnitIsAFK("player"), following)
+      + math.floor(ready / 16) * 32,
     partyHp[1], partyHp[2], partyHp[3], partyHp[4],
     level, partyBits + (dropped % 16) * 16,
   }
@@ -408,8 +426,27 @@ SlashCmdList["BOXBRIDGE"] = function(msg)
         if w == "all" then p("  " .. ch .. ": every line")
         elseif type(w) == "table" then p("  " .. ch .. ": " .. table.concat(w, ", ")) end
       end
+      if type(BoxBridgeWords.spells) == "table" then
+        local r = spellsReady()
+        for i, name in ipairs(BoxBridgeWords.spells) do
+          p("  watched spell: " .. name .. (math.floor(r / 2 ^ (i - 1)) % 2 == 1 and " (ready)" or " (not ready)"))
+        end
+      end
     end
     p(dropped .. " line(s) dropped since login because the queue was full")
+    return
+  elseif cmd == "rule" then
+    local text = "rule " .. (arg or "")
+    if (arg or "") == "" then
+      p("usage: /bb rule <name>   turns that WoWBox rule on or off; the start of its name is enough")
+    elseif #text > MAX_COMMAND_BYTES then
+      p("rule name too long (max " .. (MAX_COMMAND_BYTES - 5) .. " bytes): the start of it is enough")
+    elseif not db.enabled then
+      p("BoxBridge is off (/bb to turn it on): WoWBox can't see the command")
+    else
+      queueChat(COMMAND, "@wowbox", text)
+      p("-> WoWBox: " .. text .. " (on/off)")
+    end
     return
   elseif cmd == "stack" or cmd == "follow" or cmd == "stay" or cmd == "mirror" then
     if not db.enabled then
@@ -447,7 +484,7 @@ SlashCmdList["BOXBRIDGE"] = function(msg)
       filterVersion() == 0 and "none" or ("version " .. filterVersion()), dropped))
     return
   else
-    p("usage: /bb [all|others <command> | to <who> <command> | stack | follow | stay | mirror | panel | "
+    p("usage: /bb [all|others <command> | to <who> <command> | stack | follow | stay | mirror | rule <name> | panel | "
       .. "size <px> | height <px> | hz <n> | chat | words | test <Name> <text> | status]")
     return
   end

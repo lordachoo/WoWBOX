@@ -170,3 +170,59 @@ def test_own_follow_and_casts_are_told_to_the_party(g):
     for f in reporter_tick:  # after login: ask the party, say what we follow
         f.scripts["OnUpdate"](f, 5)
     assert list(g.sent.values())[-2:] == ["Q", "F|"]
+
+
+# ---------------------------------------------------------------- watched spells, /bb rule, the panel's rules
+SPELL_STUBS = r"""
+BoxBridgeWords = { version = 5, channels = {}, spells = { "Avenger's Shield", "Holy Shield", "Consecration",
+  "A", "B", "Exorcism" }, panel = { "Avenger's Shield on cooldown", "Buffs" } }
+CD = { ["Avenger's Shield"] = { 0, 0 }, ["Holy Shield"] = { 100, 8 }, ["Consecration"] = { 0, 0 },
+  A = { 99, 1.5 }, B = { 99, 1.5 }, Exorcism = { 0, 0 } }
+NOMANA = { Consecration = true }
+function GetSpellCooldown(name) local c = CD[name]; if c then return c[1], c[2], 1 end end
+function IsUsableSpell(name) return CD[name] ~= nil and not NOMANA[name] end
+"""
+
+
+@pytest.fixture
+def gs():
+    lua = lua51.LuaRuntime(unpack_returned_tuples=True)
+    lua.execute(STUBS + PANEL_STUBS + SPELL_STUBS)
+    for f in ("BoxBridge.lua", "BoxBridgePanel.lua"):
+        lua.execute((ADDON / f).read_text(encoding="utf-8"))
+    g = lua.globals()
+    fire(g, "PLAYER_LOGIN")
+    return g
+
+
+def state_frame(g):
+    frame = g.BoxBridgeFrame
+    frame.scripts["OnUpdate"](frame, 1.0)
+    img = np.zeros((8, 8 * NUM_BLOCKS + 30, 3), dtype=np.uint8)
+    for i in range(NUM_BLOCKS):
+        t = g.textures[i + 1]
+        img[:, i * 8:(i + 1) * 8] = [round(t.color[k] * 255) for k in (1, 2, 3)]
+    return decode_frame(img)
+
+
+def test_watched_spells_ready_bits(gs):
+    st = state_frame(gs)
+    # Avenger's Shield ready; Holy Shield cooling down; Consecration no mana; A, B on the global cooldown
+    assert st.ready_bits == 0b100001
+    assert st.combat and st.chat_filter == 5  # the other bits in those bytes are untouched
+
+
+def test_bb_rule_goes_to_wowbox(gs):
+    gs.SlashCmdList["BOXBRIDGE"]("rule aven")
+    gs.SlashCmdList["BOXBRIDGE"]("rule")  # no name: usage only
+    assert bridge_lines(gs) == [("@wowbox", "rule aven")]
+
+
+def test_panel_shows_its_rules_on_and_off(gs):
+    gs.SlashCmdList["BOXBRIDGE"]("panel")
+    tick(gs)
+    assert "Avenger's Shield on cooldown off" in gs.BoxBridgePanel.ruleLine.text
+    press(gs, encode({"broadcast": True, "rule1": True}))
+    tick(gs)
+    line = gs.BoxBridgePanel.ruleLine.text
+    assert "Avenger's Shield on cooldown ON" in line and "Buffs off" in line

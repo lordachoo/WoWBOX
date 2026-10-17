@@ -4,8 +4,8 @@ The panel (addon/BoxBridge/BoxBridgePanel.lua) shows the party itself: who follo
 whom, health, mana. Only WoWBox knows its own state (broadcast, automation, follow mode...), and the only way
 into the game is a key press, so WoWBox spells it out on three spare keys BoxBridge binds: a start key, then
 one key per flag for 0 or 1. Only clients that showed their panel (`/bb panel`) get them, and only when the
-state changes. The addon answers through the bridge with what it got (`/bb` command "panel <n>"), so a press
-lost while you were typing there is sent again.
+state changes (15 presses). The addon answers through the bridge with what it got (`/bb` command
+"panel <n>"), so a press lost while you were typing there is sent again.
 """
 from __future__ import annotations
 
@@ -19,7 +19,8 @@ log = logging.getLogger(__name__)
 
 # start, 0, 1: the same keys as BoxBridgePanel.lua binds (ALT-CTRL-SHIFT-F7/F8/F9)
 KEYS = tuple(parse_chord(k) for k in ("Ctrl+Alt+Shift+F7", "Ctrl+Alt+Shift+F8", "Ctrl+Alt+Shift+F9"))
-FLAGS = ("broadcast", "automation", "dry_run", "paused", "follow", "mirror")  # bit 0 first
+# bit 0 first; rule1-8: the rules in Words.lua's `panel` list are on
+FLAGS = ("broadcast", "automation", "dry_run", "paused", "follow", "mirror") + tuple(f"rule{i}" for i in range(1, 9))
 RETRY_AFTER = 5.0  # no answer this long after sending: send again
 MAX_TRIES = 3  # per state
 

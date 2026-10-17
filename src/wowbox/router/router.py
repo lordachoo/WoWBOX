@@ -112,7 +112,7 @@ class Router:
         """What a chord is already bound to: a hotkey name or macro:<name>."""
         return self._hotkeys.get(chord)
 
-    def set_hotkeys(self, hk: HotkeyConfig, macros: list | None = None) -> None:
+    def set_hotkeys(self, hk: HotkeyConfig, macros: list | None = None, rules: list | None = None) -> None:
         table = {}
         for name in ("toggle_broadcast", "release_all", "cycle_layout", "next_main", "automation_kill",
                      "follow", "stay", "stack", "mirror_movement"):
@@ -127,6 +127,13 @@ class Router:
                     log.warning("macro %r key %s is already used by %s; macro key ignored", m.name, m.key, table[chord])
                     continue
                 table[chord] = f"macro:{m.name}"
+        for r in rules or []:  # automation rules: the key turns the rule on or off
+            if r.hotkey:
+                chord = parse_chord(r.hotkey)
+                if chord in table:
+                    log.warning("rule %r hotkey %s is already used by %s; ignored", r.name, r.hotkey, table[chord])
+                    continue
+                table[chord] = f"rule:{r.name}"
         self._hotkeys = table
 
     # -- state ------------------------------------------------------------

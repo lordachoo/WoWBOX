@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
 
 from ..config import CHAT_CHANNELS, AutomationRule
 from ..macro_store import fmt_duration
-from .macro_editor import TO_HINT, StepTable, explain, macro_rows, rows_to_do, target_text
+from .macro_editor import TO_HINT, HotkeyEdit, StepTable, explain, macro_rows, rows_to_do, target_text
 
 # (field, label, kind) for the condition table; kind decides the comparisons and values offered
 FIELDS = [
@@ -42,6 +42,7 @@ FIELDS = [
     ("class_token", "class (e.g. WARLOCK)", "text"),
     ("position_ok", "has map coordinates", "bool"),
     ("fps", "frames per second", "number"),
+    ("ready", "spell ready (can be cast now; = a spell name, e.g. Avenger's Shield)", "text"),
 ]
 FIELD_KIND = {f: k for f, _, k in FIELDS}
 OPS = [("=", ""), ("≠", "_ne"), ("<", "_lt"), ("≤", "_lte"), (">", "_gt"), ("≥", "_gte")]
@@ -116,7 +117,8 @@ def split_list(text: str) -> list[str] | None:
 def build_rule(name: str, enabled: bool, cooldown: str, trigger: str, *, who: str = "any",
                conditions: list[dict] | None = None, every: str = "", channels: list[str] | None = None,
                senders: str = "", contains: str = "", heard_by: str = "all", queue: str = "",
-               priority: int = 0, cooldown_per_target: bool = False, steps: list[dict]) -> AutomationRule:
+               priority: int = 0, cooldown_per_target: bool = False, hotkey: str = "", panel: bool = False,
+               steps: list[dict]) -> AutomationRule:
     """Editor values -> AutomationRule. Raises ValueError with a readable message."""
     if not name.strip():
         raise ValueError("Give the rule a name.")
@@ -125,6 +127,10 @@ def build_rule(name: str, enabled: bool, cooldown: str, trigger: str, *, who: st
         data["cooldown"] = cooldown.strip()
     if priority:
         data["priority"] = priority
+    if hotkey.strip():
+        data["hotkey"] = hotkey.strip()
+    if panel:
+        data["panel"] = True
     if trigger in ("state", "chat+state"):
         when: dict = {"slot": parse_who(who)}
         for i, c in enumerate(conditions or [], 1):
@@ -254,8 +260,10 @@ class ConditionTable(QWidget):
 class RuleEditor(QDialog):
     def __init__(self, parent: QWidget | None, rule: AutomationRule | None, *, targets: list[str],
                  who_choices: list[str], rule_names: list[str],
-                 preview: Callable[[AutomationRule], str], on_test: Callable[[AutomationRule, str], str]) -> None:
+                 preview: Callable[[AutomationRule], str], on_test: Callable[[AutomationRule, str], str],
+                 conflict: Callable[[str], str | None] = lambda key: None) -> None:
         super().__init__(parent)
+        self.conflict = conflict
         self.setWindowTitle(f"Edit rule: {rule.name}" if rule else "New automation rule")
         self.resize(940, 720)
         self.other_names = rule_names
@@ -284,6 +292,20 @@ class RuleEditor(QDialog):
         self.priority.setToolTip("When rules wait for the same character (its cast or global cooldown), "
                                  "the higher priority goes first. Equal: first come, first served.")
         top.addRow("Priority", self.priority)
+        self.hotkey = HotkeyEdit(rule.hotkey or "" if rule else "")
+        self.hotkey.setToolTip("Press it (in WoW or WoWBox) to turn this rule on or off. In the game, /bb rule "
+                               "<name> does the same.")
+        self.hotkey_warning = QLabel()
+        self.hotkey_warning.setStyleSheet("color: #c62828;")
+        self.hotkey.textChanged.connect(self._check_hotkey)
+        key_row = QHBoxLayout()
+        key_row.addWidget(self.hotkey, 1)
+        key_row.addWidget(QPushButton("Clear", clicked=lambda: self.hotkey.setText("")))
+        top.addRow("On/off hotkey", key_row)
+        top.addRow("", self.hotkey_warning)
+        self.panel = QCheckBox("Show on the in-game panel whether it's on (/bb panel)")
+        self.panel.setChecked(bool(rule and rule.panel))
+        top.addRow("", self.panel)
 
         # state
         self.who = QComboBox()
@@ -418,10 +440,17 @@ class RuleEditor(QDialog):
             channels=[ch for ch, cb in self.channel_boxes.items() if cb.isChecked()],
             senders=self.senders.text(), contains=self.contains.text(), heard_by=self.heard_by.currentText(),
             queue=self.queue.currentText(), priority=self.priority.value(),
-            cooldown_per_target=self.per_target.isChecked(), steps=self.steps.read())
+            cooldown_per_target=self.per_target.isChecked(), hotkey=self.hotkey.text(),
+            panel=self.panel.isChecked(), steps=self.steps.read())
         if rule.name in self.other_names:
             raise ValueError(f"There's already a rule called {rule.name!r}.")
+        if rule.hotkey and (owner := self.conflict(rule.hotkey)):
+            raise ValueError(f"Hotkey {rule.hotkey} is already used by {owner}.")
         return rule
+
+    def _check_hotkey(self, text: str) -> None:
+        owner = self.conflict(text) if text else None
+        self.hotkey_warning.setText(f"{text} is already used by {owner}. Pick another key." if owner else "")
 
     def refresh_check(self) -> None:
         try:

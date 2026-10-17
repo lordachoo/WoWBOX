@@ -251,6 +251,8 @@ class AutomationRule(_Model):
     priority: int = Field(default=0, ge=-100, le=100)  # waiting for the same character: higher goes first
     # chat rules: "target" keeps the cooldown per {who}, so healing Gnope doesn't hold up a heal on Kunth
     cooldown_per: Literal["rule", "target"] = "rule"
+    hotkey: ChordStr | None = None  # turns the rule on/off (works while WoW or WoWBox has focus)
+    panel: bool = False  # show on BoxBridge's in-game panel whether it's on
 
     @model_validator(mode="after")
     def _trigger(self) -> "AutomationRule":

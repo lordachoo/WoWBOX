@@ -37,6 +37,8 @@ def trigger_text(rule) -> str:
         trig = "when " + ", ".join(f"{k}={v}" for k, v in rule.when.model_dump().items())
     if rule.cooldown:
         trig += f" (cooldown {fmt_duration(rule.cooldown)})"
+    if rule.hotkey:
+        trig += f" [on/off: {rule.hotkey}]"
     return trig
 
 

@@ -2,6 +2,7 @@
 --   /bb panel          show/hide it on this character (remembered per character)
 --   /bb panel alert    sound + raid warning when someone stops following (on/off)
 --   /bb panel reset    put it back in its default place (drag it to move it)
+-- Rules marked "show on the in-game panel" in WoWBox get a line saying whether they're on (/bb rule <name>).
 -- Each BoxBridge tells the party, in hidden addon messages, who it follows and what it casts on whom.
 -- Health, mana, casting, drinking and range come straight from the game.
 -- WoWBox's own state (broadcast, automation, follow mode...) arrives as three spare key presses WoWBox sends
@@ -9,7 +10,9 @@
 -- answers through the bridge with what it got.
 
 local PREFIX = "BoxBridge"
-local FLAGS = { "broadcast", "automation", "dry_run", "paused", "follow", "mirror" } -- bit 0 first, as panel.py
+-- bit 0 first, as panel.py; rule1-8: the rules in Words.lua's `panel` list are on
+local FLAGS = { "broadcast", "automation", "dry_run", "paused", "follow", "mirror",
+  "rule1", "rule2", "rule3", "rule4", "rule5", "rule6", "rule7", "rule8" }
 local KEYS = { "ALT-CTRL-SHIFT-F7", "ALT-CTRL-SHIFT-F8", "ALT-CTRL-SHIFT-F9" } -- start, 0, 1
 local ALERT_DELAY = 2 -- WoWBox's follow mode re-follows a broken follow: only warn if it's still broken then
 local SHOW_CAST = 2.5 -- an instant (or failed) cast stays on its row this long
@@ -78,6 +81,10 @@ local title = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 title:SetPoint("TOPLEFT", 8, -6)
 title:SetPoint("TOPRIGHT", -8, -6)
 title:SetJustifyH("LEFT")
+local ruleLine = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+ruleLine:SetPoint("TOPLEFT", 8, -20)
+ruleLine:SetPoint("TOPRIGHT", -8, -20)
+ruleLine:SetJustifyH("LEFT")
 
 local function text(parent, width, justify)
   local t = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -106,7 +113,6 @@ for i = 1, 5 do
   local r = CreateFrame("Frame", nil, panel)
   r:SetWidth(WIDTH - 16)
   r:SetHeight(ROW_H)
-  r:SetPoint("TOPLEFT", 8, -22 - (i - 1) * (ROW_H + 1))
   r.flash = r:CreateTexture(nil, "BACKGROUND")
   r.flash:SetAllPoints()
   r.flash:SetTexture(1, 0, 0, 0)
@@ -128,7 +134,7 @@ for i = 1, 5 do
   rows[i] = r
 end
 
-panel.title, panel.rows = title, rows -- for the tests
+panel.title, panel.ruleLine, panel.rows = title, ruleLine, rows -- for the tests
 
 local function place()
   panel:ClearAllPoints()
@@ -147,6 +153,18 @@ local function titleText()
   add(state.follow, "|cff40c0ffFOLLOW|r")
   add(state.mirror, "|cffc080ffMIRROR|r")
   return "WoWBox: " .. table.concat(parts, "  ")
+end
+
+-- the panel's rules (Words.lua `panel`) and whether WoWBox says they're on
+local function rulesText()
+  local names = type(BoxBridgeWords) == "table" and BoxBridgeWords.panel
+  if type(names) ~= "table" or #names == 0 then return nil end
+  local parts = {}
+  for i, name in ipairs(names) do
+    local on = state and state["rule" .. i]
+    parts[#parts + 1] = (on and "|cff40ff40" or "|cff808080") .. name .. (on and " ON" or " off") .. "|r"
+  end
+  return table.concat(parts, "   ")
 end
 
 local function hasBuff(unit, ...)
@@ -221,9 +239,14 @@ panel:SetScript("OnUpdate", function(_, elapsed)
   acc = 0
   local now = GetTime()
   title:SetText(titleText())
+  local rt = rulesText()
+  ruleLine:SetText(rt or "")
+  local top = rt and 36 or 22
   local units = { "player" }
   for i = 1, GetNumPartyMembers() do units[#units + 1] = "party" .. i end
   for i, r in ipairs(rows) do
+    r:ClearAllPoints()
+    r:SetPoint("TOPLEFT", 8, -top - (i - 1) * (ROW_H + 1))
     if units[i] and UnitExists(units[i]) then
       updateRow(r, units[i], now)
       r:Show()
@@ -231,7 +254,7 @@ panel:SetScript("OnUpdate", function(_, elapsed)
       r:Hide()
     end
   end
-  panel:SetHeight(28 + #units * (ROW_H + 1))
+  panel:SetHeight(top + 6 + #units * (ROW_H + 1))
   -- follow warnings that are due (see ALERT_DELAY)
   for name, m in pairs(members) do
     if m.checkAt and now >= m.checkAt then

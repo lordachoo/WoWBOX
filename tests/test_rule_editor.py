@@ -26,6 +26,8 @@ RULES = [
      "chat": {"channel": ["whisper", "party"], "contains": ["chain"], "heard_by": "Kunth"},
      "when": {"slot": "any", "casting": False, "health_pct_gte": 50.5},
      "do": {"type": "/cast Chain Heal", "to": "Kunth"}},
+    {"name": "avenger", "when": {"slot": 1, "ready": "Avenger's Shield", "combat": True},
+     "do": {"send": "Ctrl+Shift+F5", "to": "Tinkerdawn"}, "cooldown": "2s", "hotkey": "Ctrl+Alt+A", "panel": True},
 ]
 
 TEAM = """\

@@ -484,7 +484,8 @@ class MainWindow(QMainWindow):
         old_name = None if copy else source
         dlg = RuleEditor(self, rule, targets=self.c.target_choices(), who_choices=self.c.who_choices(),
                          rule_names=[n for n in names if n != old_name], preview=self.c.rule_preview,
-                         on_test=self.c.test_rule)
+                         on_test=self.c.test_rule,
+                         conflict=lambda key: self.c.macro_hotkey_owner(key, ignore_rule=old_name))
         if copy:
             dlg.setWindowTitle(f"New rule (copy of {source})")
         if old_name:
@@ -530,7 +531,7 @@ class MainWindow(QMainWindow):
         none = [s for s in stale if c.team.clients[s].state.chat_filter == 0]
         if old := [s for s in stale if s not in none]:
             lines.append(f"<b>Chat filter out of date</b> on {', '.join(name(s) for s in old)}: your chat rules "
-                         "changed, and BoxBridge loads the new word list on <b>/reload</b> (type "
+                         "(or watched spells) changed, and BoxBridge loads the new word list on <b>/reload</b> (type "
                          "<code>/bb all reload</code>). Until then those clients pass on the old list's lines.")
         if none:
             lines.append(f"<b>No chat filter loaded</b> on {', '.join(name(s) for s in none)}, so they pass on every "

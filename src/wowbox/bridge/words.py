@@ -7,6 +7,9 @@ frames (6 bits), so WoWBox can tell which clients still have an old list.
 
 Matching mirrors the engine: a line passes when its channel is listed and its text contains one of that
 channel's words (any case). A channel listed as "all" passes every line (a rule without words).
+
+It also carries two lists for the addon: `spells`, the spells `ready:` conditions ask about (the addon reports
+which of them could be cast now), and `panel`, the rules shown on the in-game panel (`panel: true`).
 """
 from __future__ import annotations
 
@@ -21,6 +24,8 @@ from ..config import AutomationRule, ChatChannel
 log = logging.getLogger(__name__)
 
 CHANNELS: tuple[str, ...] = typing.get_args(ChatChannel)  # whisper, party, raid, guild, officer, say, yell
+MAX_SPELLS = 7  # ready bits in the state frame (decoder.MAX_WATCHED_SPELLS)
+MAX_PANEL_RULES = 8  # bits after WoWBox's flags in the panel keys (panel.py)
 MAX_VERSION = 63  # the addon reports it in 6 bits; 0 = no list (it passes everything)
 FILE_NAME = "Words.lua"
 ALL = "all"
@@ -30,6 +35,8 @@ _VERSION_RE = re.compile(r"^\s*version\s*=\s*(\d+)", re.M)
 @dataclass(frozen=True)
 class ChatFilter:
     channels: dict[str, tuple[str, ...] | str]  # channel -> words (lower case), or "all"
+    spells: tuple[str, ...] = ()  # watched spells, as written in the rules
+    panel: tuple[str, ...] = ()  # names of the rules on the in-game panel
 
     def passes(self, channel: str, text: str) -> bool:
         """What the addon does with a line (for tests and the rule preview)."""
@@ -50,8 +57,34 @@ def ascii_lower(s: str) -> str:
 _LOWER = {c: c + 32 for c in range(ord("A"), ord("Z") + 1)}
 
 
-def build(rules: list[AutomationRule]) -> ChatFilter:
-    """The channels and words of every enabled chat rule."""
+def spells_asked(rules: list[AutomationRule]) -> list[str]:
+    """The spells enabled rules' `ready:` conditions ask about, in order (each once, any case)."""
+    out: list[str] = []
+    for r in rules:
+        if not r.enabled or r.when is None:
+            continue
+        for key, value in (r.when.model_extra or {}).items():
+            if key in ("ready", "ready_ne"):
+                for name in ([value] if isinstance(value, str) else value or []):
+                    name = str(name).strip()
+                    if name and ascii_lower(name) not in [ascii_lower(n) for n in out]:
+                        out.append(name)
+    return out
+
+
+def build(rules: list[AutomationRule], chat: bool = True) -> ChatFilter:
+    """The channels and words of every enabled chat rule, plus the watched spells and the panel's rules.
+    chat=False (the chat filter is off): every channel passes every line."""
+    spells = spells_asked(rules)
+    if len(spells) > MAX_SPELLS:
+        log.warning("only %d spells can be watched; ignored: %s", MAX_SPELLS, ", ".join(spells[MAX_SPELLS:]))
+    panel = [r.name for r in rules if r.panel]
+    if len(panel) > MAX_PANEL_RULES:
+        log.warning("only %d rules fit on the in-game panel; left off: %s", MAX_PANEL_RULES,
+                    ", ".join(panel[MAX_PANEL_RULES:]))
+    extra = {"spells": tuple(spells[:MAX_SPELLS]), "panel": tuple(panel[:MAX_PANEL_RULES])}
+    if not chat:
+        return ChatFilter({ch: ALL for ch in CHANNELS}, **extra)
     found: dict[str, set[str] | str] = {}
     for r in rules:
         if not r.enabled or r.chat is None:
@@ -63,7 +96,7 @@ def build(rules: list[AutomationRule]) -> ChatFilter:
                 found[ch] = ALL
             else:
                 found.setdefault(ch, set()).update(words)  # type: ignore[union-attr]
-    return ChatFilter({ch: v if v == ALL else tuple(sorted(v)) for ch, v in sorted(found.items())})
+    return ChatFilter({ch: v if v == ALL else tuple(sorted(v)) for ch, v in sorted(found.items())}, **extra)
 
 
 def _lua_string(s: str) -> str:
@@ -76,7 +109,11 @@ def body(f: ChatFilter) -> str:
     for ch, words in f.channels.items():
         value = _lua_string(ALL) if words == ALL else "{ " + ", ".join(_lua_string(w) for w in words) + " }"
         lines.append(f"    {ch} = {value},")
-    return "  channels = {\n" + "\n".join(lines) + ("\n" if lines else "") + "  },\n"
+    out = "  channels = {\n" + "\n".join(lines) + ("\n" if lines else "") + "  },\n"
+    for key in ("spells", "panel"):  # only when used: an unchanged file keeps its version
+        if names := getattr(f, key):
+            out += f"  {key} = {{ " + ", ".join(_lua_string(n) for n in names) + " },\n"
+    return out
 
 
 def lua(f: ChatFilter, version: int) -> str:
@@ -97,11 +134,18 @@ def parse(text: str) -> ChatFilter | None:
     if "BoxBridgeWords" not in text or "channels" not in text:
         return None
     channels: dict[str, tuple[str, ...] | str] = {}
-    for ch, value in _CHANNEL_RE.findall(text.split("channels", 1)[1]):
-        found = tuple(re.sub(r"\\(.)", lambda m: _UNESCAPE.get(m.group(1), m.group(1)), s)
-                      for s in _STRING_RE.findall(value))
+    block = text.split("channels", 1)[1].split("\n  },", 1)[0]
+    for ch, value in _CHANNEL_RE.findall(block):
+        found = _strings(value)
         channels[ch] = ALL if not value.startswith("{") and found == (ALL,) else found
-    return ChatFilter(channels)
+    extra = {key: _strings(m.group(1)) for key in ("spells", "panel")
+             if (m := re.search(rf"^\s*{key}\s*=\s*(\{{.*?\}})\s*,\s*$", text, re.M))}
+    return ChatFilter(channels, **extra)
+
+
+def _strings(value: str) -> tuple[str, ...]:
+    return tuple(re.sub(r"\\(.)", lambda m: _UNESCAPE.get(m.group(1), m.group(1)), s)
+                 for s in _STRING_RE.findall(value))
 
 
 def with_keyword(f: ChatFilter | None, ev):

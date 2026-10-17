@@ -9,9 +9,9 @@ Byte stream (2 bytes per block):
 
      0  0xB0 magic           1  0x0E magic           2  frame counter
      3  health 0-255         4  power 0-255          5  power type
-     6  target health        7  target flags         8  player flags
+     6  target health        7  target flags         8  player flags (bits 0-3); bits 4-7: watched spells 1-4 ready
      9  input flags         10  cast flags (bits 0-1); bits 2-7: version of the chat filter loaded (Words.lua, 0 = none)
-    11  status flags
+    11  status flags (bits 0-4); bits 5-7: watched spells 5-7 ready
     12  party1 health       13  party2 health       14  party3 health    15  party4 health
     16  level               17  party-exists bits (0-3); bits 4-7: chat lines dropped (queue full), mod 16
     18-40  character name, UTF-8, zero padded (23 bytes)
@@ -23,6 +23,9 @@ Byte stream (2 bytes per block):
     52  bit 0: position valid, bits 1-7: map dungeon level
     53  frames per second (GetFramerate, max 255)
     54  sum(bytes 0..53) % 256                      55  xor(bytes 0..53)
+
+Watched spells are the `spells` list in Words.lua (the spells `ready:` conditions ask about): a bit is set while
+that spell could be cast now, off its cooldown and the global cooldown. Older addons leave them 0.
 
 Older addons sent 0x0B as the second magic byte with a 24-byte name, a 12-byte class token in 42-53 and
 no position; those frames still decode. 0x0D (16-bit positions) is rejected with a hint to /reload.
@@ -62,6 +65,7 @@ CHAT_INPUT_BYTE = 53
 CHAT_KEYWORD = 1  # first text byte: the next one is the matched word's number in Words.lua, then the text after it
 CHAT_AFTER_WORD = CHAT_TEXT_BYTES.stop - CHAT_TEXT_BYTES.start - 2  # bytes of text after a matched word
 NUM_BYTES = 56
+MAX_WATCHED_SPELLS = 7
 NUM_BLOCKS = NUM_BYTES // 2
 
 # flag bits
@@ -130,6 +134,8 @@ class ClientState:
     fps: int = 0  # the client's frame rate: keys only register once per frame
     chat_filter: int = 0  # version of Words.lua the addon loaded (0: none, or an older addon: every line passes)
     chat_dropped: int = 0  # chat lines the addon threw away because its queue was full, mod 16
+    ready_bits: int = 0  # bit i: watched spell i+1 (Words.lua `spells`) can be cast now
+    ready: tuple[str, ...] = ()  # those spells by name, lower case (filled in by WoWBox from the list the client loaded)
     level: int = 0
     party_health_pct: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
     party_exists: tuple[bool, bool, bool, bool] = (False, False, False, False)
@@ -276,6 +282,7 @@ def _to_state(d: bytes) -> ClientState:
         level=d[16],
         party_exists=tuple(bool(pbits & (1 << i)) for i in range(4)),  # type: ignore[arg-type]
         chat_dropped=pbits >> 4,
+        ready_bits=(pf >> 4) | (st >> 5) << 4,
         name=_text(d[NAME_BYTES_V1 if d[1] == KIND_STATE_V1 else NAME_BYTES]),
         class_token=_text(d[CLASS_BYTES]) if d[1] == KIND_STATE_V1 else CLASS_TOKENS.get(d[41], ""),
         **({} if d[1] == KIND_STATE_V1 else _position(d)),
@@ -301,8 +308,10 @@ def encode_bytes(values: dict, frame: int) -> list[int]:
     party = list(v.get("party", [0, 0, 0, 0]))
     data = [MAGIC[0], KIND_STATE, frame % 256,
             v.get("health", 0), v.get("power", 0), v.get("power_type", 0),
-            v.get("target_health", 0), v.get("target_flags", 0), v.get("player_flags", 0),
-            v.get("input_flags", 0), v.get("cast_flags", 0) | (v.get("chat_filter", 0) << 2), v.get("status_flags", 0),
+            v.get("target_health", 0), v.get("target_flags", 0),
+            v.get("player_flags", 0) | (v.get("ready_bits", 0) & 15) << 4,
+            v.get("input_flags", 0), v.get("cast_flags", 0) | (v.get("chat_filter", 0) << 2),
+            v.get("status_flags", 0) | (v.get("ready_bits", 0) >> 4 & 7) << 5,
             *party[:4], v.get("level", 0), v.get("party_bits", 0) | (v.get("chat_dropped", 0) % 16) << 4]
     data += list(v.get("name", "").encode("utf-8")[:23].ljust(23, bytes(1)))
     data.append(CLASS_IDS.get(v.get("class", ""), 0))
