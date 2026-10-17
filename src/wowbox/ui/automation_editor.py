@@ -44,6 +44,7 @@ FIELDS = [
     ("fps", "frames per second", "number"),
     ("ready", "spell ready (can be cast now; = a spell name, e.g. Avenger's Shield)", "text"),
     ("dot", "DoT needed (castable, and not on the target from you; = a spell name, e.g. Corruption)", "text"),
+    ("same_target", "same target as (= a character name or slot, e.g. Tinkerdawn)", "text"),
 ]
 FIELD_KIND = {f: k for f, _, k in FIELDS}
 OPS = [("=", ""), ("≠", "_ne"), ("<", "_lt"), ("≤", "_lte"), (">", "_gt"), ("≥", "_gte")]

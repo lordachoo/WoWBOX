@@ -224,3 +224,14 @@ def test_addon_wowbox_actions():
     g.SlashCmdList["BOXBRIDGE"]("stack")
     ev = _draw(g)
     assert isinstance(ev, ChatEvent) and (ev.channel, ev.sender, ev.text) == ("command", "@wowbox", "stack")
+
+
+def test_addon_target_id():
+    lua, g = _load()
+    lua.execute('GUIDS = { target = "0xF13000064E0012A4" }\nfunction UnitGUID(u) return GUIDS[u] end')
+    first = _draw(g).target_id
+    assert first and _draw(g).target_id == first and _draw(g).name == "Tankadin"
+    g.GUIDS.target = "0xF13000064E0012A5"  # another mob of the same kind
+    assert _draw(g).target_id not in (0, first)
+    g.U.target = None
+    assert _draw(g).target_id == 0

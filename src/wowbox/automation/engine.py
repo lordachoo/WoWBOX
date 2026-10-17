@@ -74,12 +74,33 @@ def _not_ready(have: tuple[str, ...], want: object) -> bool:
     return not any(str(n).strip().lower() in have for n in names)
 
 
+def _same_target(mine: int, other: int | None) -> bool:
+    """`same_target: Tinkerdawn`: this character's target is the same mob as that one's (both have one)."""
+    return bool(mine) and mine == other
+
+
+def _other_target(mine: int, other: int | None) -> bool:
+    """`same_target_ne: Tinkerdawn`: this character has a target, and it isn't that one's (e.g. to /assist again)."""
+    return bool(mine) and mine != other
+
+
+def _find_state(states: dict[int, ClientState | None], who: object) -> ClientState | None:
+    """The state of the character `who` names: a slot number, or a character name (any case)."""
+    if isinstance(who, int) or str(who).strip().isdigit():
+        return states.get(int(who))  # type: ignore[arg-type]
+    low = str(who).strip().lower()
+    return next((st for st in states.values() if st is not None and st.name.lower() == low), None)
+
+
 def compile_condition(cond: Condition) -> list[tuple[str, Callable[[object, object], bool], object]]:
     preds = []
     for key, value in (cond.model_extra or {}).items():
         if key in ("ready", "ready_ne", "dot", "dot_ne"):  # names in a list the bridge reports
             fld = key.removesuffix("_ne")
             preds.append((fld + "s" if fld == "dot" else fld, _not_ready if key.endswith("_ne") else _ready, value))
+            continue
+        if key in ("same_target", "same_target_ne"):  # compared with another character's state (condition_report)
+            preds.append(("target_id", _other_target if key.endswith("_ne") else _same_target, value))
             continue
         op_fn, fld = operator.eq, key
         for suffix, fn in OPS.items():
@@ -121,12 +142,18 @@ def condition_report(cond: Condition, states: dict[int, ClientState | None], pre
         if far and slot in far:
             per.append((slot, False, far[slot]))
             continue
-        failed = next(((fld, fn, val) for fld, fn, val in preds if not fn(getattr(st, fld), val)), None)
+        failed = next(((fld, fn, val) for fld, fn, val in preds if not _holds(st, fld, fn, val, states)), None)
         if failed is None:
             per.append((slot, True, ""))
         else:
             fld, fn, val = failed
-            if fld == "ready":
+            if fn in (_same_target, _other_target):
+                other = _find_state(states, val)
+                why = ("no target" if not st.target_id else f"no bridge data from {_show(val)}"
+                       if other is None or other.stale else f"on {_show(val)}'s target" if fn is _other_target
+                       else f"{_show(val)} has no target" if not other.target_id else f"not {_show(val)}'s target")
+                per.append((slot, False, why))
+            elif fld == "ready":
                 per.append((slot, False, f"{_show(val)} {'not ready' if fn is _ready else 'ready'}"))
             elif fld == "dots":
                 why = "not needed (on the target, or not castable)" if fn is _ready else "needed"
@@ -138,6 +165,13 @@ def condition_report(cond: Condition, states: dict[int, ClientState | None], pre
         return False, per
     hits = [ok for _, ok, _ in per]
     return (all(hits) if cond.slot == "all" else any(hits)), per
+
+
+def _holds(st: ClientState, fld: str, fn: Callable, val: object, states: dict[int, ClientState | None]) -> bool:
+    if fn in (_same_target, _other_target):
+        other = _find_state(states, val)
+        return other is not None and not other.stale and fn(st.target_id, other.target_id)
+    return fn(getattr(st, fld), val)
 
 
 def matched_word(trig: ChatTrigger, text: str) -> str | None:

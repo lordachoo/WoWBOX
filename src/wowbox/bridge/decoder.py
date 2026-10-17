@@ -15,7 +15,8 @@ Byte stream (2 bytes per block):
     11  status flags (bits 0-4); bits 5-7: watched spells 5-7 ready
     12  party1 health       13  party2 health       14  party3 health    15  party4 health
     16  level               17  party-exists bits (0-3); bits 4-7: chat lines dropped (queue full), mod 16
-    18-40  character name, UTF-8, zero padded (23 bytes)
+    18-37  character name, UTF-8, zero padded (20 bytes)
+    38-40  target id: a 24-bit hash of the target's GUID, high byte first (0 = no target, or an older addon)
     41  class (CLASS_IDS)
     42-44  map x, 0-16777215 = 0.0-1.0 (GetPlayerMapPosition; high byte first)
     45-47  map y, same
@@ -60,7 +61,8 @@ POS_VALID = 1
 U24_MAX = 0xFFFFFF
 MARK_EVEN, MARK_ODD = 224, 32
 NAME_BYTES_V1 = slice(18, 42)
-NAME_BYTES = slice(18, 41)
+NAME_BYTES = slice(18, 38)
+TARGET_ID_BYTES = 38
 CLASS_BYTES = slice(42, 54)
 CHAT_SENDER_BYTES = slice(6, 26)
 CHAT_TEXT_BYTES = slice(26, 53)
@@ -142,6 +144,7 @@ class ClientState:
     ready: tuple[str, ...] = ()  # those spells by name, lower case (filled in by WoWBox from the list the client loaded)
     dot_bits: int = 0  # bit i: DoT i+1 (Words.lua `dots`) should go on the target now
     dots: tuple[str, ...] = ()  # those DoTs by name, lower case
+    target_id: int = 0  # which mob the target is (the same in every client); 0: no target, or an older addon
     level: int = 0
     party_health_pct: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
     party_exists: tuple[bool, bool, bool, bool] = (False, False, False, False)
@@ -291,6 +294,7 @@ def _to_state(d: bytes) -> ClientState:
         ready_bits=(pf >> 4) | (st >> 5) << 4,
         dot_bits=(tf >> 5) | (inp >> 2) << 3 | (d[5] >> 3) << 9,
         name=_text(d[NAME_BYTES_V1 if d[1] == KIND_STATE_V1 else NAME_BYTES]),
+        target_id=0 if d[1] == KIND_STATE_V1 else _u24(d, TARGET_ID_BYTES),
         class_token=_text(d[CLASS_BYTES]) if d[1] == KIND_STATE_V1 else CLASS_TOKENS.get(d[41], ""),
         **({} if d[1] == KIND_STATE_V1 else _position(d)),
     )
@@ -321,7 +325,9 @@ def encode_bytes(values: dict, frame: int) -> list[int]:
             v.get("cast_flags", 0) | (v.get("chat_filter", 0) << 2),
             v.get("status_flags", 0) | (v.get("ready_bits", 0) >> 4 & 7) << 5,
             *party[:4], v.get("level", 0), v.get("party_bits", 0) | (v.get("chat_dropped", 0) % 16) << 4]
-    data += list(v.get("name", "").encode("utf-8")[:23].ljust(23, bytes(1)))
+    data += list(v.get("name", "").encode("utf-8")[:20].ljust(20, bytes(1)))
+    tid = v.get("target_id", 0)
+    data += [tid >> 16 & 255, tid >> 8 & 255, tid & 255]
     data.append(CLASS_IDS.get(v.get("class", ""), 0))
     pos = v.get("pos")  # (x, y, facing, map_id, level) or None
     if pos:

@@ -149,7 +149,7 @@ All in-game commands (`/bb` is short for `/boxbridge`):
 | `/bb height <px>` | Override the render height used for pixel snapping. Rarely needed. |
 | `/bb hz <n>` | Strip update rate, 1–60 (default 15). |
 | `/bb chat` | Stop or resume passing chat lines to WoWBox for this client. |
-| `/bb words` | Show the chat filter this client loaded (which words pass, per channel) and how many lines it dropped. |
+| `/bb words` | Show the chat filter this client loaded (which words pass, per channel), how many lines it dropped, the watched spells and DoTs, and the target's id (the same on every character on that mob). |
 | `/bb test <Name> <text>` | Pretend `<Name>` whispered `<text>`, for testing chat automation. It says so if the chat filter drops it. |
 
 Settings are saved per character.
@@ -747,6 +747,7 @@ automation:
 - **Fields:** `health_pct`, `power_pct`, `power_type`, `target_exists`, `target_hostile`, `target_dead`, `target_is_player`, `target_in_combat`, `target_health_pct`, `combat`, `resting`, `in_party`, `in_raid`, `typing`, `chat_open`, `casting`, `channeling`, `mounted`, `dead`, `ghost`, `afk`, `following`, `level`, `position_ok`, `map_x`, `map_y`, `facing`, `map_id`, `fps`.
 - **`ready: <spell>`:** that spell could be cast now: known, off its cooldown *and* the global cooldown, with enough mana or rage, and for a spell cast at your target, the target in range (*spell ready* in the editor's field list). `ready_ne` is the opposite; a list (`ready: [Holy Shield, Consecration]`) needs all of them. See *Keep a spell on cooldown* below.
 - **`dot: <spell>`:** that DoT should go on the target now: castable (as for `ready:`), and not on the target from *you*, or with less than 2 seconds left (*DoT needed* in the editor). See *Keep DoTs up* below.
+- **`same_target: <character>`:** this character's target is the same mob as that character's (a name or a slot number; *same target as* in the editor). `same_target_ne:` is the opposite: it has a target, but not that one's. See *Fight only the tank's mob* below.
 - **Who matched: `{name}`.** When the condition matches, the steps can use the character it matched:
 
   | Placeholder | Filled with |
@@ -802,13 +803,14 @@ How it works:
 A DoT has no cooldown, so `ready:` would recast it every few seconds. `dot:` asks whether *your* DoT is on the target instead. Example: the warlock (slot 2) joins the tank's fight and keeps his DoTs up:
 
 ```yaml
-  - name: NEC assist                      # the tank is fighting: target its mob, send the pet
-    when: { slot: 1, combat: true, target_hostile: true }
-    do: { sequence: [ { type: /assist Tinkerdawn, to: "class:WARLOCK" }, { type: /petattack, to: "class:WARLOCK" } ] }
+  - name: NEC assist                      # the tank's mob is fighting: target it too
+    when: { slot: 1, combat: true, target_hostile: true, target_in_combat: true }
+    do: { type: /assist Tinkerdawn, to: "class:WARLOCK" }
     cooldown: 5s
 
   - name: NEC corruption
-    when: { slot: 2, target_hostile: true, target_in_combat: true, dot: Corruption, casting: false, channeling: false }
+    when: { slot: 2, target_hostile: true, target_in_combat: true, same_target: Tinkerdawn, dot: Corruption,
+            casting: false, channeling: false }
     do: { type: /cast Corruption, to: "class:WARLOCK" }
     cooldown: 6s
     priority: 5
@@ -818,6 +820,26 @@ A DoT has no cooldown, so `ready:` would recast it every few seconds. `dot:` ask
 - **Mine only:** another warlock's Corruption on the mob doesn't count. A DoT with less than 2 seconds left counts as gone, so it's renewed as it runs out.
 - **The debuff must have the spell's name.** If a spell's debuff is called something else on your server, the DoT never looks "on" and the rule recasts it every cooldown; `/bb words` (with a target) shows each watched DoT as *on your target*, *NEEDED* or *not castable now*.
 - **Up to 14 DoTs**, written into `Words.lua` (`dots`) like the watched spells; after adding one, `/bb all reload`.
+
+### Fight only the tank's mob: `same_target:`
+
+`/assist` can leave a character on the wrong mob: one the tank only clicked or tabbed to, or an old target when the assist didn't take (the tank had no target at that moment). That mob is "hostile" and soon "in combat" too, so `target_hostile` and `target_in_combat` can't tell it from the tank's, and a pet sent at it brings the whole pack back. Every BoxBridge (1.4 or newer) shows which mob its target is, so WoWBox can compare:
+
+```yaml
+  - name: NEC re-assist                   # on a fighting mob that isn't the tank's: take the tank's again
+    when: { slot: 2, target_hostile: true, target_in_combat: true, same_target_ne: Tinkerdawn }
+    do: { type: /assist Tinkerdawn, to: "class:WARLOCK" }
+    cooldown: 3s
+
+  - name: NEC pet attack                  # the pet only goes for the tank's mob, and only within spell range
+    when: { slot: 2, target_hostile: true, target_in_combat: true, same_target: Tinkerdawn, ready: Corruption }
+    do: { type: /petattack, to: "class:WARLOCK" }
+    cooldown: 5s
+```
+
+- **Add it to every rule that attacks** (pet, shots, DoTs). The Next column says why one waits: *not Tinkerdawn's target*, *Tinkerdawn has no target*, *no target*.
+- **`ready:` as a range check:** `ready: Corruption` is only true when Corruption could hit that target now, so a mob 60 yards away never gets the pet. A hunter can use a shot without a cooldown (Steady Shot), but shots don't work up close.
+- **Every client needs BoxBridge 1.4.** An older one reports no target, so `same_target` is never true there and those rules wait. `/bb words` shows the target's id: two characters on the same mob show the same number.
 
 ### Timers: `every:`
 

@@ -205,3 +205,30 @@ def test_bridge_state_gets_dot_names(c):
     st = ClientState(chat_filter=c.words_version, dot_bits=1)
     c._on_bridge_state(2, st)
     assert st.dots == ("corruption",) and st.ready == ()
+
+
+# ---------------------------------------------------------------- the same mob: `same_target:`
+def test_target_id_rides_after_the_name():
+    strip = encode({"name": "Tinkerbow", "target_id": 0xABCDEF, "class": "HUNTER"}, 3, 8)
+    img = np.full((strip.shape[0] + 10, strip.shape[1] + 40, 3), 37, dtype=np.uint8)
+    img[: strip.shape[0], : strip.shape[1]] = strip
+    st = decode(img)
+    assert (st.name, st.target_id, st.class_token) == ("Tinkerbow", 0xABCDEF, "HUNTER")
+
+
+def test_same_target_condition():
+    tank = ClientState(name="Tinkerdawn", target_id=77)
+    states = {1: tank, 4: ClientState(name="Tinkerbow", target_id=77)}
+    by_name = Condition.model_validate({"slot": 4, "same_target": "tinkerdawn"})
+    by_slot = Condition.model_validate({"slot": 4, "same_target": 1})
+    assert condition_report(by_name, states)[0] and condition_report(by_slot, states)[0]
+    states[4] = ClientState(name="Tinkerbow", target_id=12)  # a mob you're not fighting
+    ok, per = condition_report(by_name, states)
+    assert not ok and per[0][2] == "not tinkerdawn's target"
+    assert condition_report(Condition.model_validate({"slot": 4, "same_target_ne": "Tinkerdawn"}), states)[0]
+    states[4] = ClientState(name="Tinkerbow")  # no target
+    assert condition_report(by_name, states)[1][0][2] == "no target"
+    states[4], states[1] = ClientState(name="Tinkerbow", target_id=5), ClientState(name="Tinkerdawn")
+    assert not condition_report(by_name, states)[0]  # neither has... the tank has none: never "the same"
+    del states[1]
+    assert "no bridge data" in condition_report(by_name, states)[1][0][2]

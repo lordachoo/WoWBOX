@@ -269,6 +269,17 @@ local function mapToCurrentZone()
   if SetMapToCurrentZone and not (WorldMapFrame and WorldMapFrame:IsShown()) then SetMapToCurrentZone() end
 end
 
+-- which unit the target is, as a 24-bit number (0: no target): the same mob gives the same number in every
+-- client, so WoWBox can tell whether two characters have the same target (`same_target:`)
+local NAME_BYTES = 20
+local function targetId()
+  local guid = UnitExists("target") and (UnitGUID and UnitGUID("target") or UnitName("target")) or nil
+  if not guid then return 0 end
+  local h = 0
+  for i = 1, #guid do h = (h * 31 + string.byte(guid, i)) % 16777216 end
+  return h == 0 and 1 or h
+end
+
 local function snapshot()
   local tExists = UnitExists("target") and true or false
   local inRaid = GetNumRaidMembers() > 0
@@ -303,7 +314,11 @@ local function snapshot()
     partyHp[1], partyHp[2], partyHp[3], partyHp[4],
     level, partyBits + (dropped % 16) * 16,
   }
-  addText(d, UnitName("player"), 23)
+  addText(d, UnitName("player"), NAME_BYTES)
+  local id = targetId()
+  d[#d + 1] = math.floor(id / 65536)
+  d[#d + 1] = math.floor(id / 256) % 256
+  d[#d + 1] = id % 256
   d[#d + 1] = CLASS_IDS[classToken or ""] or 0
   addPosition(d)
   return d
@@ -468,6 +483,8 @@ SlashCmdList["BOXBRIDGE"] = function(msg)
           p("  watched DoT: " .. name .. " (" .. why .. ")")
         end
       end
+      p("target id: " .. (UnitExists("target") and (targetId() .. " (characters on the same mob show the same id)")
+        or "no target"))
     end
     p(dropped .. " line(s) dropped since login because the queue was full")
     return
