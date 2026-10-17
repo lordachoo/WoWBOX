@@ -153,7 +153,7 @@ class Router:
     @property
     def held_mods(self) -> Mod:
         m = Mod.NONE
-        for vk in self._held_mod_vks:
+        for vk in tuple(self._held_mod_vks):  # macros read this from their own thread while keys change it
             m |= MODIFIER_VKS[vk]
         return m
 
