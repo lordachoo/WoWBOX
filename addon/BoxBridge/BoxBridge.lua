@@ -429,7 +429,7 @@ end)
 
 SLASH_BOXBRIDGE1 = "/boxbridge"
 SLASH_BOXBRIDGE2 = "/bb"
-SlashCmdList["BOXBRIDGE"] = function(msg)
+local function bbCommand(msg)
   if not db then return end
   local cmd, arg = string.match(msg or "", "^%s*(%S*)%s*(.-)%s*$")
   cmd = string.lower(cmd or "")
@@ -473,9 +473,13 @@ SlashCmdList["BOXBRIDGE"] = function(msg)
       if type(BoxBridgeWords.spells) == "table" then
         local r = spellsReady()
         for i, name in ipairs(BoxBridgeWords.spells) do
-          p("  watched spell: " .. name .. (math.floor(r / 2 ^ (i - 1)) % 2 == 1 and " (ready)" or " (not ready)")
-            .. " | in range: " .. tostring(IsSpellInRange(name, "target")) .. ", usable: "
-            .. tostring((IsUsableSpell(name))))
+          local raw = " (not a spell of yours)"
+          if GetSpellCooldown(name) then -- only ask the game about spells this character has
+            local okR, range = pcall(IsSpellInRange, name, "target")
+            local okU, usable = pcall(IsUsableSpell, name)
+            raw = " | in range: " .. tostring(okR and range or "error") .. ", usable: " .. tostring(okU and usable or "error")
+          end
+          p("  watched spell: " .. name .. (math.floor(r / 2 ^ (i - 1)) % 2 == 1 and " (ready)" or " (not ready)") .. raw)
         end
       end
       if type(BoxBridgeWords.dots) == "table" then
@@ -544,6 +548,11 @@ SlashCmdList["BOXBRIDGE"] = function(msg)
     return
   end
   apply()
+end
+-- an error in a command is shown, not swallowed (the game hides Lua errors and leaves the line in the chat box)
+SlashCmdList["BOXBRIDGE"] = function(msg)
+  local ok, err = pcall(bbCommand, msg)
+  if not ok then p("error in /bb " .. tostring(msg) .. ": " .. tostring(err)) end
 end
 
 -- for BoxBridgePanel.lua: tell WoWBox something (a /bb command it handles itself). False while the bridge is off.
