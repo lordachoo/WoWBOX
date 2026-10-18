@@ -681,11 +681,19 @@ class AutomationEngine:
 
     def _queue(self, rt: RuleRuntime, req: _Request, busy: str) -> None:
         name, who = rt.rule.name, req.sender.lower()
-        if who == (rt.current_sender or "").lower() and rt.running_step is not None or \
-                any(q.sender.lower() == who for q in rt.pending):
-            self._event(f"rule {name!r}: {req.sender} is already being served or queued, skipped")
+        # one place per person; for a rule that acts on {who} ("paladin buff gnope"), per person *and* {who},
+        # so one sender can line up buffs for several people
+        by_who = "who" in _args_used(rt.steps)
+
+        def same(target: str) -> bool:
+            return not by_who or target == req.target
+
+        if who == (rt.current_sender or "").lower() and rt.running_step is not None and same(rt.current_target) \
+                or any(q.sender.lower() == who and same(q.target) for q in rt.pending):
+            what = f"{req.sender}'s request for {req.target}" if by_who else req.sender
+            self._event(f"rule {name!r}: {what} is already being served or queued, skipped")
             return
-        if busy == "on cooldown" and rt.rule.cooldown_per == "target":
+        if busy == "on cooldown" and (rt.rule.cooldown_per == "target" or by_who):
             if req.target == rt.current_target and who == (rt.last_sender or "").lower():
                 self._event(f"rule {name!r}: on cooldown for {req.target}, chat from {req.sender} skipped "
                             "(just served)")

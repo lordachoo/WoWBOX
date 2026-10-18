@@ -629,3 +629,20 @@ def test_cooldown_per_target_needs_a_chat_rule():
     with pytest.raises(ValueError, match="cooldown per target needs a chat trigger"):
         AppConfig.model_validate({"automation": [{"name": "x", "every": "5s", "cooldown_per": "target",
                                                   "do": {"send": "1"}}]})
+
+
+def test_one_sender_can_queue_requests_for_different_people():
+    pal = {"name": "pal-buff", "chat": {"channel": ["party"], "contains": ["paladin buff"], "heard_by": "Kunth"},
+           "do": {"sequence": [{"type": "/cast [@{who}] Kings", "to": "Kunth"}, {"wait": "3s"},
+                               {"type": "/cast [@{who}] Might", "to": "Kunth"}]},
+           "cooldown": "3s"}
+    e, sender = engine([pal])
+    e.on_chat(3, whisper(text="paladin buff kunth", channel="party"), now=0)
+    e.on_chat(3, whisper(text="paladin buff gnope", channel="party"), now=1)  # a different person: queued
+    e.on_chat(3, whisper(text="paladin buff gnope pls", channel="party"), now=1.5)  # the same one again: skipped
+    e.on_chat(3, whisper(text="paladin buff jhemi", channel="party"), now=2)
+    assert [q.target for q in e.rules[0].pending] == ["gnope", "jhemi"]
+    run(e, 0, 30)
+    assert [t.lower() for t in typed(sender)] == ["/cast [@kunth] kings", "/cast [@kunth] might",
+                                                  "/cast [@gnope] kings", "/cast [@gnope] might",
+                                                  "/cast [@jhemi] kings", "/cast [@jhemi] might"]
