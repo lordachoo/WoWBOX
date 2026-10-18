@@ -273,3 +273,13 @@ def test_addon_cant_hit():
     g.now = 20
     _fire(g, "UI_ERROR_MESSAGE", "Target needs to be infront of you.")  # this server's wording
     assert _draw(g).cant_hit
+
+
+def test_addon_attacking():
+    lua, g = _load()
+    assert not _draw(g).attacking
+    _fire(g, "PLAYER_ENTER_COMBAT")
+    st = _draw(g)
+    assert st.attacking and st.class_token == "PALADIN"
+    _fire(g, "PLAYER_LEAVE_COMBAT")
+    assert not _draw(g).attacking

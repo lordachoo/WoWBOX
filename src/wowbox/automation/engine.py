@@ -84,6 +84,11 @@ def _other_target(mine: int, other: int | None) -> bool:
     return bool(mine) and mine != other
 
 
+def _ally_attacking(_mine: object, other: ClientState) -> bool:
+    """`ally_attacking: Tinkerdawn`: that character's auto-attack is on (so this one only fights when they do)."""
+    return other.attacking
+
+
 def _find_state(states: dict[int, ClientState | None], who: object) -> ClientState | None:
     """The state of the character `who` names: a slot number, or a character name (any case)."""
     if isinstance(who, int) or str(who).strip().isdigit():
@@ -101,6 +106,9 @@ def compile_condition(cond: Condition) -> list[tuple[str, Callable[[object, obje
             continue
         if key in ("same_target", "same_target_ne"):  # compared with another character's state (condition_report)
             preds.append(("target_id", _other_target if key.endswith("_ne") else _same_target, value))
+            continue
+        if key == "ally_attacking":  # another character's auto-attack
+            preds.append(("attacking", _ally_attacking, value))
             continue
         op_fn, fld = operator.eq, key
         for suffix, fn in OPS.items():
@@ -153,6 +161,11 @@ def condition_report(cond: Condition, states: dict[int, ClientState | None], pre
                        if other is None or other.stale else f"on {_show(val)}'s target" if fn is _other_target
                        else f"{_show(val)} has no target" if not other.target_id else f"not {_show(val)}'s target")
                 per.append((slot, False, why))
+            elif fn is _ally_attacking:
+                other = _find_state(states, val)
+                why = (f"no bridge data from {_show(val)}" if other is None or other.stale
+                       else f"{_show(val)} isn't attacking")
+                per.append((slot, False, why))
             elif fld == "ready":
                 per.append((slot, False, f"{_show(val)} {'not ready' if fn is _ready else 'ready'}"))
             elif fld == "dots":
@@ -171,6 +184,9 @@ def _holds(st: ClientState, fld: str, fn: Callable, val: object, states: dict[in
     if fn in (_same_target, _other_target):
         other = _find_state(states, val)
         return other is not None and not other.stale and fn(st.target_id, other.target_id)
+    if fn is _ally_attacking:
+        other = _find_state(states, val)
+        return other is not None and not other.stale and fn(None, other)
     return fn(getattr(st, fld), val)
 
 

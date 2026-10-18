@@ -294,6 +294,9 @@ local RANGE_WORDS = { "within about 10 yards", "within about 28 yards", "farther
 -- Closer than ~10 yards is the one thing CheckInteractDistance can't tell, so this is how a rule learns
 -- a character in "range" still can't hit. Lasts CANT_HIT_SECONDS, and only while the target stays the same.
 local CANT_HIT_SECONDS = 3
+-- auto-attack on (PLAYER_ENTER_COMBAT .. PLAYER_LEAVE_COMBAT): "I'm fighting this", unlike being in combat,
+-- which a mob that only chases you also causes
+local attacking = false
 local cantHitUntil, cantHitGuid = 0, nil
 local function targetGuid() return UnitGUID and UnitGUID("target") end
 -- matched loosely (lower case, anywhere in the text): the client and the server word these differently
@@ -356,6 +359,7 @@ local function snapshot()
   d[#d + 1] = math.floor(id / 256) % 256
   d[#d + 1] = id % 256
   d[#d + 1] = (CLASS_IDS[classToken or ""] or 0) + targetRange() * 16 + (cantHit() and 64 or 0)
+    + (attacking and 128 or 0)
   addPosition(d)
   return d
 end
@@ -443,6 +447,8 @@ if WorldMapFrame then WorldMapFrame:HookScript("OnHide", mapToCurrentZone) end
 events:RegisterEvent("AUTOFOLLOW_BEGIN")
 events:RegisterEvent("AUTOFOLLOW_END")
 events:RegisterEvent("UI_ERROR_MESSAGE")
+events:RegisterEvent("PLAYER_ENTER_COMBAT")
+events:RegisterEvent("PLAYER_LEAVE_COMBAT")
 events:SetScript("OnEvent", function(_, event, msg, sender)
   if event == "PLAYER_ENTERING_WORLD" or string.find(event, "^ZONE_CHANGED") then
     mapToCurrentZone()
@@ -450,6 +456,10 @@ events:SetScript("OnEvent", function(_, event, msg, sender)
   end
   if event == "AUTOFOLLOW_BEGIN" or event == "AUTOFOLLOW_END" then
     following = event == "AUTOFOLLOW_BEGIN"
+    return
+  end
+  if event == "PLAYER_ENTER_COMBAT" or event == "PLAYER_LEAVE_COMBAT" then
+    attacking = event == "PLAYER_ENTER_COMBAT"
     return
   end
   if event == "UI_ERROR_MESSAGE" then
@@ -538,7 +548,7 @@ local function bbCommand(msg)
         p(string.format("last game error: \"%s\" %.0fs ago (%s)", tostring(lastError), GetTime() - lastErrorAt,
           isCantHit(lastError) and "counts as can't hit" or "not a can't-hit error"))
       end
-      p("can't hit now: " .. (cantHit() and "yes" or "no"))
+      p("can't hit now: " .. (cantHit() and "yes" or "no") .. " | auto-attack: " .. (attacking and "on" or "off"))
     end
     p(dropped .. " line(s) dropped since login because the queue was full")
     return

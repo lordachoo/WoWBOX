@@ -37,6 +37,7 @@ FIELDS = [
     ("target_in_combat", "target in combat", "bool"),
     ("target_range", "target's distance, yards (10, 28 or 100 = farther; measured by the game)", "number"),
     ("cant_hit", "can't hit the target: facing the wrong way / too far (last 3 s)", "bool"),
+    ("attacking", "auto-attack is on", "bool"),
     ("in_party", "in a party", "bool"),
     ("in_raid", "in a raid", "bool"),
     ("level", "level", "number"),
@@ -47,6 +48,7 @@ FIELDS = [
     ("ready", "spell ready (can be cast now; = a spell name, e.g. Avenger's Shield)", "text"),
     ("dot", "DoT needed (castable, and not on the target from you; = a spell name, e.g. Corruption)", "text"),
     ("same_target", "same target as (= a character name or slot, e.g. Tinkerdawn)", "text"),
+    ("ally_attacking", "auto-attack is on for (= a character name or slot, e.g. Tinkerdawn)", "text"),
 ]
 FIELD_KIND = {f: k for f, _, k in FIELDS}
 OPS = [("=", ""), ("≠", "_ne"), ("<", "_lt"), ("≤", "_lte"), (">", "_gt"), ("≥", "_gte")]

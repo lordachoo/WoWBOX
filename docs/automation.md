@@ -42,6 +42,8 @@ automation:
 - **`ready: <spell>`:** that spell could be cast now: known, off its cooldown *and* the global cooldown, with enough mana or rage, and for a spell cast at your target, the target in range (*spell ready* in the editor's field list). `ready_ne` is the opposite; a list (`ready: [Holy Shield, Consecration]`) needs all of them. See *Keep a spell on cooldown* below.
 - **`dot: <spell>`:** that DoT should go on the target now: castable (as for `ready:`), and not on the target from *you*, or with less than 2 seconds left (*DoT needed* in the editor). See *Keep DoTs up* below.
 - **`target_range: <yards>`:** how far the target is, measured by the game in steps: 10, 28, or 100 (farther, or no target); e.g. `target_range_lte: 10`. An older BoxBridge reports 999 (unknown). See *Fight only the tank's mob* below.
+- **`attacking: true`:** this character's auto-attack is on. Unlike `combat`, which a mob that only chases you also sets, this is "I'm fighting it". Needs BoxBridge 1.6.
+- **`ally_attacking: <name|slot>`:** that character's auto-attack is on, e.g. `ally_attacking: Tinkerdawn` on the warlock's DoTs. See *Fight only when the tank does* below.
 - **`cant_hit: true`:** the game just refused a swing or cast at the current target: *You are facing the wrong way!*, *You are too far away!*, *Target needs to be in front of you.* or *Out of range.* It stays true for 3 seconds, and only while the target stays the same. Needs BoxBridge 1.5. See *Running into melee* below.
 - **`same_target: <character>`:** this character's target is the same mob as that character's (a name or a slot number; *same target as* in the editor). `same_target_ne:` is the opposite: it has a target, but not that one's. See *Fight only the tank's mob* below.
 - **Who matched: `{name}`.** When the condition matches, the steps can use the character it matched:
@@ -161,7 +163,12 @@ A DoT has no cooldown, so `ready:` would recast it every few seconds. `dot:` ask
   ```
 
   Add `cant_hit: false` to the DoT rules too: starting a cast stops Interact's run, and the casts would only fail again. `cant_hit` needs something to fail first: `/startattack` on, or a cast. The game's wording varies ("Out of range" or "Out of range.", custom servers' own text), so BoxBridge matches the words *out of range*, *too far away*, *facing the wrong way* and *front of you* / *infront* (EQWOW says "Target needs to be infront of you") anywhere in the error; `/bb words` shows the last game error and whether it counted. Don't make the run-in depend on `following: true`: Interact takes the character off follow, so it would run in only on the first pull after each `/follow`.
-- **Every client needs BoxBridge 1.4** (1.5 for `cant_hit`). An older one reports no target, so `same_target` is never true there and those rules wait. `/bb words` shows the target's id: two characters on the same mob show the same number.
+- **Fight only when the tank does: `attacking` and `ally_attacking`.** Running through a hostile zone, a mob that aggroes the tank puts it in combat, targeted, close by: exactly what the assist rule looks for, so the others stop and fight (and a run-in pulls them off `/follow`). Gate on the tank's auto-attack instead:
+  - the assist: `when: { slot: 1, combat: true, attacking: true, … }`;
+  - every rule that acts on the tank's mob (re-assist, pet, run-ins, DoTs, shots): add `ally_attacking: Tinkerdawn` next to `same_target: Tinkerdawn`.
+
+  They join once you swing, boss fights included, and stop the moment your auto-attack stops: a queued DoT is dropped (*condition no longer true*). A ranged pull waits until the mob reaches you and you start swinging. `/bb words` shows *auto-attack: on/off*.
+- **Every client needs BoxBridge 1.4** (1.5 for `cant_hit`, 1.6 for `attacking`). An older one reports no target, so `same_target` is never true there and those rules wait. `/bb words` shows the target's id: two characters on the same mob show the same number.
 
 ## Timers: `every:`
 

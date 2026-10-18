@@ -273,3 +273,25 @@ def test_cant_hit_rides_with_the_class():
     cond = Condition.model_validate({"slot": 2, "cant_hit": True})
     assert condition_report(cond, {2: ClientState(cant_hit=True)})[0]
     assert not condition_report(cond, {2: ClientState()})[0]
+
+
+# ---------------------------------------------------------------- fight only when the tank does: `attacking`
+def test_attacking_rides_with_the_class():
+    for flag in (True, False):
+        strip = encode({"name": "Gnope", "class": "WARLOCK", "range_code": 2, "cant_hit": True, "attacking": flag}, 3, 8)
+        img = np.full((strip.shape[0] + 10, strip.shape[1] + 40, 3), 37, dtype=np.uint8)
+        img[: strip.shape[0], : strip.shape[1]] = strip
+        st = decode(img)
+        assert (st.class_token, st.target_range, st.cant_hit, st.attacking) == ("WARLOCK", 28, True, flag)
+
+
+def test_ally_attacking_condition():
+    cond = Condition.model_validate({"slot": 2, "same_target": "Tinkerdawn", "ally_attacking": "Tinkerdawn"})
+    tank = ClientState(name="Tinkerdawn", target_id=7, attacking=True)
+    nec = ClientState(name="Gnope", target_id=7)
+    assert condition_report(cond, {1: tank, 2: nec})[0]
+    ok, per = condition_report(cond, {1: ClientState(name="Tinkerdawn", target_id=7), 2: nec})
+    assert not ok and per[0][2] == "Tinkerdawn isn't attacking"
+    by_slot = Condition.model_validate({"slot": 2, "ally_attacking": 1})
+    assert condition_report(by_slot, {1: tank, 2: nec})[0]
+    assert not condition_report(by_slot, {2: nec})[0]  # no data from the tank: don't fight
