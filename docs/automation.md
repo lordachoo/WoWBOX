@@ -160,7 +160,7 @@ A DoT has no cooldown, so `ready:` would recast it every few seconds. `dot:` ask
       priority: 20
   ```
 
-  `cant_hit` needs something to fail first: `/startattack` on, or a cast. Don't make the run-in depend on `following: true`: Interact takes the character off follow, so it would run in only on the first pull after each `/follow`.
+  Add `cant_hit: false` to the DoT rules too: starting a cast stops Interact's run, and the casts would only fail again. `cant_hit` needs something to fail first: `/startattack` on, or a cast. The game's wording varies ("Out of range" or "Out of range.", custom servers' own text), so BoxBridge matches the words *out of range*, *too far away*, *facing the wrong way* and *in front of you* anywhere in the error; `/bb words` shows the last game error and whether it counted. Don't make the run-in depend on `following: true`: Interact takes the character off follow, so it would run in only on the first pull after each `/follow`.
 - **Every client needs BoxBridge 1.4** (1.5 for `cant_hit`). An older one reports no target, so `same_target` is never true there and those rules wait. `/bb words` shows the target's id: two characters on the same mob show the same number.
 
 ## Timers: `every:`

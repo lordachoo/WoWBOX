@@ -296,9 +296,21 @@ local RANGE_WORDS = { "within about 10 yards", "within about 28 yards", "farther
 local CANT_HIT_SECONDS = 3
 local cantHitUntil, cantHitGuid = 0, nil
 local function targetGuid() return UnitGUID and UnitGUID("target") end
+-- matched loosely (lower case, anywhere in the text): the client and the server word these differently
+-- ("Out of range" / "Out of range.", custom servers' own wording)
+local CANT_HIT_WORDS = { "out of range", "too far away", "facing the wrong way", "in front of you" }
+local lastError, lastErrorAt = nil, 0
 local function isCantHit(msg)
-  return msg ~= nil and (msg == ERR_BADATTACKFACING or msg == ERR_BADATTACKPOS
-    or msg == SPELL_FAILED_UNIT_NOT_INFRONT or msg == SPELL_FAILED_OUT_OF_RANGE)
+  if type(msg) ~= "string" then return false end
+  for _, k in ipairs({ ERR_BADATTACKFACING, ERR_BADATTACKPOS, SPELL_FAILED_UNIT_NOT_INFRONT,
+      SPELL_FAILED_OUT_OF_RANGE, ERR_SPELL_OUT_OF_RANGE, ERR_OUT_OF_RANGE }) do
+    if msg == k then return true end
+  end
+  local m = string.lower(msg)
+  for _, w in ipairs(CANT_HIT_WORDS) do
+    if string.find(m, w, 1, true) then return true end
+  end
+  return false
 end
 local function cantHit()
   return cantHitUntil > 0 and UnitExists("target") and GetTime() < cantHitUntil and targetGuid() == cantHitGuid
@@ -441,6 +453,7 @@ events:SetScript("OnEvent", function(_, event, msg, sender)
     return
   end
   if event == "UI_ERROR_MESSAGE" then
+    lastError, lastErrorAt = msg, GetTime()
     if isCantHit(msg) then cantHitUntil, cantHitGuid = GetTime() + CANT_HIT_SECONDS, targetGuid() end
     return
   end
@@ -521,6 +534,11 @@ local function bbCommand(msg)
       p("target id: " .. (UnitExists("target") and (targetId() .. " (characters on the same mob show the same id)")
         or "no target") .. " | guid: " .. tostring(UnitGUID and UnitGUID("target")))
       if UnitExists("target") then p("target distance: " .. RANGE_WORDS[targetRange()]) end
+      if lastError then
+        p(string.format("last game error: \"%s\" %.0fs ago (%s)", tostring(lastError), GetTime() - lastErrorAt,
+          isCantHit(lastError) and "counts as can't hit" or "not a can't-hit error"))
+      end
+      p("can't hit now: " .. (cantHit() and "yes" or "no"))
     end
     p(dropped .. " line(s) dropped since login because the queue was full")
     return
