@@ -208,3 +208,58 @@ def test_a_waiting_rule_is_not_dropped_for_the_global_cooldown():
     src.st[3] = ClientState(power_pct=80)  # global cooldown
     e.tick(2)
     assert sender.sent == [("F1", [3]), ("F2", [3])]
+
+
+def test_a_queued_rules_cooldown_runs_from_when_it_goes_out():
+    # ten DoTs fire together: the last ones wait longer than their own cooldown. Counted from joining the line,
+    # the cooldown is already over when the cast goes out, and the rule fires again 0.1 s later (the DoT hasn't
+    # landed yet), straight into the global cooldown: "spell isn't ready yet"
+    dots = [{"name": f"dot{i}", "when": {"slot": 3, "power_pct_gt": 50}, "do": {"send": f"F{i}", "to": [3]},
+             "cooldown": "6s", "priority": 10 - i} for i in range(1, 7)]
+    e, sender, _ = engine(dots, rule_gap=1.5)
+    at, t = [], 0.0
+    while t <= 20:
+        n = len(sender.sent)
+        e.tick(round(t, 2))
+        at += [(round(t, 2), k) for k, _ in sender.sent[n:]]
+        t += 0.1
+    times = [w for w, _ in at]
+    assert all(b - a >= 1.5 - 1e-9 for a, b in zip(times, times[1:]))  # never two casts inside the gap
+    for key in {k for _, k in at}:
+        mine = [w for w, k in at if k == key]
+        assert all(b - a >= 6 - 1e-9 for a, b in zip(mine, mine[1:])), (key, mine)  # 6 s from each cast
+
+
+def test_a_rule_firing_again_waits_for_the_gap_after_its_own_last_step():
+    rule = {"name": "dot", "when": {"slot": 3, "power_pct_gt": 50}, "do": {"send": "F2", "to": [3]},
+            "cooldown": "1s"}
+    e, sender, _ = engine([rule], rule_gap=1.5)
+    e.tick(0)
+    e.tick(1.1)  # off its cooldown, but its own cast 1.1 s ago still holds the global cooldown
+    assert len(sender.sent) == 1
+    e.tick(1.6)
+    assert len(sender.sent) == 2
+
+
+def test_a_sequence_is_not_held_up_by_its_own_steps():
+    rule = {"name": "buff", "when": {"slot": 3, "power_pct_gt": 50}, "cooldown": "1m",
+            "do": {"sequence": [{"send": "F1", "to": [3]}, {"wait": "200ms"}, {"send": "F2", "to": [3]}]}}
+    e, sender, _ = engine([rule], rule_gap=1.5)
+    e.tick(0)
+    e.tick(0.3)
+    assert [k for k, _ in sender.sent] == ["F1", "F2"]
+
+
+def test_cooldown_counts_from_the_send_after_waiting_in_line():
+    first = {"name": "first", "when": {"slot": 3, "power_pct_gt": 50}, "do": {"send": "F1", "to": [3]},
+             "cooldown": "1m", "priority": 5}
+    dot = {"name": "dot", "when": {"slot": 3, "power_pct_gt": 50}, "do": {"send": "F2", "to": [3]},
+           "cooldown": "3s"}
+    e, sender, _ = engine([first, dot], rule_gap=1.5)
+    t, at = 0.0, []
+    while t <= 6:
+        n = len(sender.sent)
+        e.tick(round(t, 2))
+        at += [(round(t, 2), k) for k, _ in sender.sent[n:]]
+        t += 0.1
+    assert [w for w, k in at if k == "F2"] == [1.5, 4.5]  # 3 s after it went out at 1.5 s, not after joining at 0

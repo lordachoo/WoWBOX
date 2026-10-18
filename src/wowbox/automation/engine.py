@@ -826,6 +826,12 @@ class AutomationEngine:
                     self._release(rt)
                     self._event(f"  dropped {describe(steps)}: condition no longer true", slots)
                     return
+                if waited:  # the cooldown runs from when it actually goes out, not from when it joined the line:
+                    # a DoT that waited 7 s behind others is otherwise off its 6 s cooldown the moment it's cast,
+                    # and fires again before the DoT lands
+                    rt.last_fired = now
+                    if rt.rule.cooldown_per == "target":
+                        rt.target_fired[rt.current_target] = now
             rt.running_step += 1
             if isinstance(step, WaitStep):
                 rt.resume_at = now + step.seconds
@@ -861,9 +867,11 @@ class AutomationEngine:
         later, why = now, ""
         waiting = {r.rule.name for r in self.rules if r.wait_reason}  # a claim only counts while its rule waits
         ahead = [c for s in slots if (c := self._claims.get(s)) and c[0] != me and c[1] >= prio and c[0] in waiting]
-        others = [last for s in slots if (last := self._slot_last.get(s)) and last[1] != me]
+        # this rule's own last step doesn't hold up the rest of its sequence, but does hold up a new firing of it
+        mine_too = rt.running_step == 0
+        others = [last for s in slots if (last := self._slot_last.get(s)) and (mine_too or last[1] != me)]
         latest = max(others, default=None)  # (time, rule) of another rule's last step on these characters
-        casting = [s for s in slots if self._casting(s) and self._slot_last.get(s, (0.0, ""))[1] != me]
+        casting = [s for s in slots if self._casting(s) and (mine_too or self._slot_last.get(s, (0.0, ""))[1] != me)]
         if ahead:
             later, why = now + CLAIM_RECHECK, f"{ahead[0][0]!r} goes first"
         elif o.rule_gap > 0 and latest and latest[0] + o.rule_gap > now:
