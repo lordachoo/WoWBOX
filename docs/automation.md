@@ -42,6 +42,7 @@ automation:
 - **`ready: <spell>`:** that spell could be cast now: known, off its cooldown *and* the global cooldown, with enough mana or rage, and for a spell cast at your target, the target in range (*spell ready* in the editor's field list). `ready_ne` is the opposite; a list (`ready: [Holy Shield, Consecration]`) needs all of them. See *Keep a spell on cooldown* below.
 - **`dot: <spell>`:** that DoT should go on the target now: castable (as for `ready:`), and not on the target from *you*, or with less than 2 seconds left (*DoT needed* in the editor). See *Keep DoTs up* below.
 - **`target_range: <yards>`:** how far the target is, measured by the game in steps: 10, 28, or 100 (farther, or no target); e.g. `target_range_lte: 10`. An older BoxBridge reports 999 (unknown). See *Fight only the tank's mob* below.
+- **`cant_hit: true`:** the game just refused a swing or cast at the current target: *You are facing the wrong way!*, *You are too far away!*, *Target needs to be in front of you.* or *Out of range.* It stays true for 3 seconds, and only while the target stays the same. Needs BoxBridge 1.5. See *Running into melee* below.
 - **`same_target: <character>`:** this character's target is the same mob as that character's (a name or a slot number; *same target as* in the editor). `same_target_ne:` is the opposite: it has a target, but not that one's. See *Fight only the tank's mob* below.
 - **Who matched: `{name}`.** When the condition matches, the steps can use the character it matched:
 
@@ -138,7 +139,29 @@ A DoT has no cooldown, so `ready:` would recast it every few seconds. `dot:` ask
 - **A rule that waited its turn is checked again.** When ten DoT rules fire together they go out one by one (`rule_gap`). Each state rule's condition is checked again when its turn comes, and dropped if it no longer holds (the mob died meanwhile); the Activity tab says *dropped ...: condition no longer true*.
 - **`target_dead: false`:** a corpse stays hostile, and "in combat" for a few seconds, and the tank often keeps it targeted. Without this the rules keep casting at it.
 - **Distance: `target_range`.** The game measures how far the target really is, in steps: `10` (within about 10 yards), `28` (about 28), `100` (farther, or no target). `target_range_lte: 10` keeps the pet home unless the mob is close. Don't use `ready:` as a range check for this: the game's spell range check doesn't know about every aura (on EQWOW an aura that shortens a warlock's spell range still reports *in range* at full range); `/bb words` shows the distance and what the game says.
-- **Every client needs BoxBridge 1.4.** An older one reports no target, so `same_target` is never true there and those rules wait. `/bb words` shows the target's id: two characters on the same mob show the same number.
+- **Running into melee: `target_range_gt: 10` and `cant_hit`.** The game can't tell an addon anything closer than about 10 yards, and a character inside 10 yards may still be too far to swing, or facing away. So run in on either signal, with two rules that press Interact With Target (see *Running a character into melee range* in [slash commands](slash-commands.md)). It runs to the target and turns to face it:
+
+  ```yaml
+    - name: NEC run in                    # the tank's mob is out of reach
+      when: { slot: 2, target_hostile: true, target_dead: false, target_in_combat: true, same_target: Tinkerdawn,
+              target_range_gt: 10 }
+      do:
+        sequence:
+          - { send: Ctrl+Shift+I, to: "class:WARLOCK" }
+          - { wait: 750ms }
+          - { type: /startattack, to: "class:WARLOCK" }
+      cooldown: 5s
+      priority: 20
+
+    - name: NEC run in - can't hit        # close, but the game says facing the wrong way / too far away
+      when: { slot: 2, target_hostile: true, target_dead: false, same_target: Tinkerdawn, cant_hit: true }
+      do: { send: Ctrl+Shift+I, to: "class:WARLOCK" }
+      cooldown: 2s
+      priority: 20
+  ```
+
+  `cant_hit` needs something to fail first: `/startattack` on, or a cast. Don't make the run-in depend on `following: true`: Interact takes the character off follow, so it would run in only on the first pull after each `/follow`.
+- **Every client needs BoxBridge 1.4** (1.5 for `cant_hit`). An older one reports no target, so `same_target` is never true there and those rules wait. `/bb words` shows the target's id: two characters on the same mob show the same number.
 
 ## Timers: `every:`
 

@@ -289,6 +289,21 @@ local function targetRange()
 end
 local RANGE_WORDS = { "within about 10 yards", "within about 28 yards", "farther than 28 yards" }
 
+-- "can't hit": the game just refused a swing or cast at this target because of facing or distance
+-- ("You are facing the wrong way!", "You are too far away!", "Target needs to be in front of you.", "Out of range.").
+-- Closer than ~10 yards is the one thing CheckInteractDistance can't tell, so this is how a rule learns
+-- a character in "range" still can't hit. Lasts CANT_HIT_SECONDS, and only while the target stays the same.
+local CANT_HIT_SECONDS = 3
+local cantHitUntil, cantHitGuid = 0, nil
+local function targetGuid() return UnitGUID and UnitGUID("target") end
+local function isCantHit(msg)
+  return msg ~= nil and (msg == ERR_BADATTACKFACING or msg == ERR_BADATTACKPOS
+    or msg == SPELL_FAILED_UNIT_NOT_INFRONT or msg == SPELL_FAILED_OUT_OF_RANGE)
+end
+local function cantHit()
+  return cantHitUntil > 0 and UnitExists("target") and GetTime() < cantHitUntil and targetGuid() == cantHitGuid
+end
+
 local function snapshot()
   local tExists = UnitExists("target") and true or false
   local inRaid = GetNumRaidMembers() > 0
@@ -328,7 +343,7 @@ local function snapshot()
   d[#d + 1] = math.floor(id / 65536)
   d[#d + 1] = math.floor(id / 256) % 256
   d[#d + 1] = id % 256
-  d[#d + 1] = (CLASS_IDS[classToken or ""] or 0) + targetRange() * 16
+  d[#d + 1] = (CLASS_IDS[classToken or ""] or 0) + targetRange() * 16 + (cantHit() and 64 or 0)
   addPosition(d)
   return d
 end
@@ -415,6 +430,7 @@ end
 if WorldMapFrame then WorldMapFrame:HookScript("OnHide", mapToCurrentZone) end
 events:RegisterEvent("AUTOFOLLOW_BEGIN")
 events:RegisterEvent("AUTOFOLLOW_END")
+events:RegisterEvent("UI_ERROR_MESSAGE")
 events:SetScript("OnEvent", function(_, event, msg, sender)
   if event == "PLAYER_ENTERING_WORLD" or string.find(event, "^ZONE_CHANGED") then
     mapToCurrentZone()
@@ -422,6 +438,10 @@ events:SetScript("OnEvent", function(_, event, msg, sender)
   end
   if event == "AUTOFOLLOW_BEGIN" or event == "AUTOFOLLOW_END" then
     following = event == "AUTOFOLLOW_BEGIN"
+    return
+  end
+  if event == "UI_ERROR_MESSAGE" then
+    if isCantHit(msg) then cantHitUntil, cantHitGuid = GetTime() + CANT_HIT_SECONDS, targetGuid() end
     return
   end
   if CHANNELS[event] then

@@ -247,3 +247,23 @@ def test_addon_target_range():
     assert _draw(g).target_range == 100
     g.U.target = None
     assert _draw(g).target_range == 100
+
+
+def test_addon_cant_hit():
+    lua, g = _load()
+    lua.execute('ERR_BADATTACKFACING = "You are facing the wrong way!"\n'
+                'GUIDS = { target = "0xF13000064E0012A4" }\nfunction UnitGUID(u) return GUIDS[u] end')
+    assert not _draw(g).cant_hit
+    _fire(g, "UI_ERROR_MESSAGE", "Not enough mana")  # other errors don't count
+    assert not _draw(g).cant_hit
+    _fire(g, "UI_ERROR_MESSAGE", "You are facing the wrong way!")
+    st = _draw(g)
+    assert st.cant_hit and st.class_token == "PALADIN"
+    g.now = 2.9
+    assert _draw(g).cant_hit
+    g.now = 3.1  # it wears off
+    assert not _draw(g).cant_hit
+    _fire(g, "UI_ERROR_MESSAGE", "You are facing the wrong way!")
+    assert _draw(g).cant_hit
+    g.GUIDS.target = "0xF13000064E0012A5"  # a new target starts clean
+    assert not _draw(g).cant_hit

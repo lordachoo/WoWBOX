@@ -261,3 +261,15 @@ def test_target_changes_are_logged_with_whose_mob_it_is(c, caplog):
     assert len(lines) == 2
     assert "Tinkerbow -> mob #9" in lines[0] and "NOT the leader's mob (#7)" in lines[0] and "farther" in lines[0]
     assert "the leader's mob" in lines[1] and "within 10 yd" in lines[1]
+
+
+def test_cant_hit_rides_with_the_class():
+    for flag in (True, False):
+        strip = encode({"name": "Gnope", "class": "WARLOCK", "range_code": 1, "cant_hit": flag}, 3, 8)
+        img = np.full((strip.shape[0] + 10, strip.shape[1] + 40, 3), 37, dtype=np.uint8)
+        img[: strip.shape[0], : strip.shape[1]] = strip
+        st = decode(img)
+        assert (st.class_token, st.target_range, st.cant_hit) == ("WARLOCK", 10, flag)
+    cond = Condition.model_validate({"slot": 2, "cant_hit": True})
+    assert condition_report(cond, {2: ClientState(cant_hit=True)})[0]
+    assert not condition_report(cond, {2: ClientState()})[0]

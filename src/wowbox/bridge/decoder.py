@@ -17,7 +17,7 @@ Byte stream (2 bytes per block):
     16  level               17  party-exists bits (0-3); bits 4-7: chat lines dropped (queue full), mod 16
     18-37  character name, UTF-8, zero padded (20 bytes)
     38-40  target id: a 24-bit hash of the target's GUID, high byte first (0 = no target, or an older addon)
-    41  class (CLASS_IDS, bits 0-3); bits 4-5: target distance (1: within ~10 yd, 2: ~28 yd, 3: farther / none; 0: older addon)
+    41  class (CLASS_IDS, bits 0-3); bits 4-5: target distance (1: within ~10 yd, 2: ~28 yd, 3: farther / none; 0: older addon); bit 6: can't hit the target (facing / too far, last 3 s)
     42-44  map x, 0-16777215 = 0.0-1.0 (GetPlayerMapPosition; high byte first)
     45-47  map y, same
     48-49  facing, 0-65535 = 0-2pi radians (GetPlayerFacing: 0 = north, counter-clockwise)
@@ -147,6 +147,7 @@ class ClientState:
     dot_bits: int = 0  # bit i: DoT i+1 (Words.lua `dots`) should go on the target now
     dots: tuple[str, ...] = ()  # those DoTs by name, lower case
     target_range: int = RANGE_UNKNOWN  # yards to the target, measured by the game: 10, 28, 100 (farther / none)
+    cant_hit: bool = False  # the game just said "facing the wrong way" / "too far away" / "out of range" (last 3 s, same target)
     target_id: int = 0  # which mob the target is (the same in every client); 0: no target, or an older addon
     level: int = 0
     party_health_pct: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
@@ -300,6 +301,7 @@ def _to_state(d: bytes) -> ClientState:
         target_id=0 if d[1] == KIND_STATE_V1 else _u24(d, TARGET_ID_BYTES),
         class_token=_text(d[CLASS_BYTES]) if d[1] == KIND_STATE_V1 else CLASS_TOKENS.get(d[41] & 15, ""),
         target_range=RANGE_UNKNOWN if d[1] == KIND_STATE_V1 else TARGET_RANGES[d[41] >> 4 & 3],
+        cant_hit=d[1] != KIND_STATE_V1 and bool(d[41] & 64),
         **({} if d[1] == KIND_STATE_V1 else _position(d)),
     )
 
@@ -332,7 +334,7 @@ def encode_bytes(values: dict, frame: int) -> list[int]:
     data += list(v.get("name", "").encode("utf-8")[:20].ljust(20, bytes(1)))
     tid = v.get("target_id", 0)
     data += [tid >> 16 & 255, tid >> 8 & 255, tid & 255]
-    data.append(CLASS_IDS.get(v.get("class", ""), 0) | v.get("range_code", 0) << 4)
+    data.append(CLASS_IDS.get(v.get("class", ""), 0) | v.get("range_code", 0) << 4 | (64 if v.get("cant_hit") else 0))
     pos = v.get("pos")  # (x, y, facing, map_id, level) or None
     if pos:
         x, y, facing, map_id, level = pos
