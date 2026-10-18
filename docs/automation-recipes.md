@@ -125,7 +125,7 @@ automation:
 
 ## Recipe: group ports on a party keyword ("port lavastorm")
 
-Say `port lavastorm` in party from any of your characters. Kunth announces it in party and casts the port, so you don't have to swap windows or dig through the spellbook. One rule per destination, all the same shape. These are the P99 druid group ports up to Velious (Skyfire's is Wind of the North, not a Circle), cast here by the shaman (`class:SHAMAN`). Use `class:DRUID` or a name if your porter is someone else.
+Say `port lavastorm` in party from any of your characters. Kunth announces it in party and casts the port, so you don't have to swap windows or dig through the spellbook. One rule per destination, all the same shape. These are the P99 druid group ports up to Velious (Skyfire and the Emerald Jungle use Wind of the North and Wind of the South, not a Circle), cast here by the shaman (`class:SHAMAN`). Use `class:DRUID` or a name if your porter is someone else.
 
 ```yaml
 automation:
@@ -175,6 +175,7 @@ The full set. Copy the first rule above for each row, changing the name, keyword
 | `port cobalt` | Cobalt Scar | Circle of Cobalt Scar |
 | `port wakening`, `port wl` | the Wakening Lands | Circle of Wakening Lands |
 | `port skyfire` | the Skyfire Mountains | Wind of the North |
+| `port emerald`, `port ej` | the Emerald Jungle | Wind of the South |
 
 **How it fits together**
 - **`sender: [team]`.** Only your own characters can trigger a port. A stranger in a pickup group typing "port ro" does nothing.
