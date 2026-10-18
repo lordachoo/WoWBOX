@@ -88,7 +88,7 @@ automation:
   | 3 s | Randompug asks: queued (#2). |
   | after Tinkerdawn's run and the cooldown | Gnope is served, then Randompug. |
 
-  - **One place per person:** asking again while you're queued or being served doesn't add a second place.
+  - **One place per person:** asking again while you're queued or being served doesn't add a second place. A rule that acts on `{who}` keeps one place per person *and* `{who}`: "paladin buff kunth" then "paladin buff gnope" from the same person queues Gnope's round behind Kunth's.
   - **Limits:** up to `chat_queue` requests (5) wait, each for at most `chat_queue_ttl` (60 s). Older ones are dropped and logged.
   - **The condition is checked again** when a request's turn comes. If the rule has `when:` and it's false then, the request is dropped.
   - **Per rule:** set *Queue while busy* in the editor (`queue:` in YAML) to a number, `off` (`0`, the old skip-it behaviour) or `default`.
