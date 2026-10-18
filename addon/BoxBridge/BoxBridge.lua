@@ -298,7 +298,7 @@ local cantHitUntil, cantHitGuid = 0, nil
 local function targetGuid() return UnitGUID and UnitGUID("target") end
 -- matched loosely (lower case, anywhere in the text): the client and the server word these differently
 -- ("Out of range" / "Out of range.", custom servers' own wording)
-local CANT_HIT_WORDS = { "out of range", "too far away", "facing the wrong way", "in front of you" }
+local CANT_HIT_WORDS = { "out of range", "too far away", "facing the wrong way", "front of you", "infront" }
 local lastError, lastErrorAt = nil, 0
 local function isCantHit(msg)
   if type(msg) ~= "string" then return false end

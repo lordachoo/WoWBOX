@@ -270,3 +270,6 @@ def test_addon_cant_hit():
     g.now = 10
     _fire(g, "UI_ERROR_MESSAGE", "Out of range.")  # no global for it: matched by its words
     assert _draw(g).cant_hit
+    g.now = 20
+    _fire(g, "UI_ERROR_MESSAGE", "Target needs to be infront of you.")  # this server's wording
+    assert _draw(g).cant_hit
