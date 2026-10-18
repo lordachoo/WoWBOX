@@ -17,4 +17,6 @@ New-Item -ItemType Directory -Force (Join-Path $out "config") | Out-Null
 Copy-Item config\team.example.yaml (Join-Path $out "config\team.example.yaml") -Force
 Copy-Item addon (Join-Path $out "addon") -Recurse -Force
 Copy-Item README.md $out -Force
+New-Item -ItemType Directory -Force (Join-Path $out "docs") | Out-Null
+Copy-Item docs\*.md (Join-Path $out "docs") -Exclude hunter-plan.md -Force
 Write-Host "Built $out\wowbox.exe"

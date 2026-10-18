@@ -18,7 +18,7 @@ log = logging.getLogger(__name__)
 
 HEADER = """\
 # WoWBox macros. The Macros tab edits this file (New / Edit / Duplicate / Delete); you can edit it by hand too,
-# then press Reload config. Format: README section 12.
+# then press Reload config. Format: docs/macros.md.
 #   steps: type (a chat line), send (one key), keys (several, `delay` apart), wait, macro (start another)
 #   to:    all | followers | leader | not:leader | a character name | class:WARLOCK | role:healer | [slots]
 """

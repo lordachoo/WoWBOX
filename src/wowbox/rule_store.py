@@ -18,7 +18,7 @@ log = logging.getLogger(__name__)
 
 HEADER = """\
 # WoWBox automation rules. The Automation tab edits this file (New / Edit / Duplicate / Delete); you can edit
-# it by hand too, then press Reload config. Format: README section 13.
+# it by hand too, then press Reload config. Format: docs/automation.md.
 #   trigger: when (a state condition) | every (a timer) | chat (a chat line, optionally plus when)
 #   steps:   type (a chat line), send (one key), keys (several), wait, macro (start one)
 # Automation as a whole starts OFF and in dry run (toolbar); Ctrl+Alt+K is the kill switch.
