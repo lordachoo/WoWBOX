@@ -162,6 +162,21 @@ A DoT has no cooldown, so `ready:` would recast it every few seconds. `dot:` ask
       priority: 20
   ```
 
+  **A ranged character only needs to turn.** Interact turns it to face the target and starts running; a tap of a movement key right after cancels the run, so it stays where it is, facing the mob:
+
+  ```yaml
+    - name: HUNTER face target            # "Target needs to be in front of you"
+      when: { slot: 4, target_hostile: true, target_dead: false, same_target: Tinkerdawn, ally_attacking: Tinkerdawn,
+              cant_hit: true }
+      do:
+        sequence:
+          - { send: Ctrl+Shift+I, to: "class:HUNTER" }
+          - { wait: 150ms }
+          - { send: S, to: "class:HUNTER" }
+      cooldown: 2s
+      priority: 20
+  ```
+
   Add `cant_hit: false` to the DoT rules too: starting a cast stops Interact's run, and the casts would only fail again. `cant_hit` needs something to fail first: `/startattack` on, or a cast. The game's wording varies ("Out of range" or "Out of range.", custom servers' own text), so BoxBridge matches the words *out of range*, *too far away*, *facing the wrong way* and *front of you* / *infront* (EQWOW says "Target needs to be infront of you") anywhere in the error; `/bb words` shows the last game error and whether it counted. Don't make the run-in depend on `following: true`: Interact takes the character off follow, so it would run in only on the first pull after each `/follow`.
 - **Fight only when the tank does: `attacking` and `ally_attacking`.** Running through a hostile zone, a mob that aggroes the tank puts it in combat, targeted, close by: exactly what the assist rule looks for, so the others stop and fight (and a run-in pulls them off `/follow`). Gate on the tank's auto-attack instead:
   - the assist: `when: { slot: 1, combat: true, attacking: true, … }`;
