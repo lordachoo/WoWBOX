@@ -162,7 +162,7 @@ A DoT has no cooldown, so `ready:` would recast it every few seconds. `dot:` ask
       priority: 20
   ```
 
-  **A ranged character only needs to turn.** Interact turns it to face the target and starts running; a tap of a movement key right after cancels the run, so it stays where it is, facing the mob:
+  **A ranged character only needs to turn.** Interact doesn't turn a hunter (on EQWOW, even with Click-to-Move on), but starting a `/follow` turns a character toward the one it follows, and a movement key stops it at once. The tank is in melee with the mob, so facing the tank is facing the mob:
 
   ```yaml
     - name: HUNTER face target            # "Target needs to be in front of you"
@@ -170,8 +170,8 @@ A DoT has no cooldown, so `ready:` would recast it every few seconds. `dot:` ask
               cant_hit: true }
       do:
         sequence:
-          - { send: Ctrl+Shift+I, to: "class:HUNTER" }
-          - { wait: 150ms }
+          - { type: /follow Tinkerdawn, to: "class:HUNTER" }
+          - { wait: 200ms }
           - { send: S, to: "class:HUNTER" }
       cooldown: 2s
       priority: 20
