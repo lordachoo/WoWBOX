@@ -72,7 +72,7 @@ class RuleList(QWidget):
         # Fixed widths, not ResizeToContents: that re-measures the whole column each time a cell changes, and
         # Status / Last fired change every refresh (0.4 s a refresh with ~80 rules, 4 refreshes a second).
         hh.setSectionResizeMode(QHeaderView.Interactive)
-        for col, width in (("On", 50), ("Name", 220), ("Trigger", 300), ("Actions", 260), ("Status", 170),
+        for col, width in (("Name", 220), ("Trigger", 300), ("Actions", 260), ("Status", 170),
                            ("Next", 230), ("Last fired", 90), ("Fired", 55)):  # long text: cut with ...
             hh.setSectionResizeMode(AUTO_COLS.index(col), QHeaderView.Interactive)
             t.setColumnWidth(AUTO_COLS.index(col), width)
@@ -172,6 +172,7 @@ class RuleList(QWidget):
             head.setExpanded(f"{by}|{head.data(0, GROUP)}" not in collapsed)
         if current in self.items:
             t.setCurrentItem(self.items[current])
+        t.resizeColumnToContents(AUTO_COLS.index("On"))  # the rules' checkboxes sit indented under their group
         self._restoring = False
         t.blockSignals(False)
         self.apply_filter()
