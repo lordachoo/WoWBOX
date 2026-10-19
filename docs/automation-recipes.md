@@ -123,6 +123,43 @@ automation:
 - **Channels.** A rule listens only on its channels. In a raid group, `/party` still reaches your subgroup. For lines typed in `/raid`, add `raid` to the rule's channels.
 - **Exact names.** Spell names must match the game's exactly, including your server's custom spells.
 
+## Recipe: buff anyone, or the whole group ("paladin buff team")
+
+One rule buffs whoever you name, and with `team` or `group` everyone, one after another. Say it in party from any of your characters.
+
+```yaml
+automation:
+  - name: Paladin Buff Tgt
+    chat:
+      channel: [whisper, party]
+      sender: [team]                 # only your own characters can ask
+      contains: [paladin buff]
+      heard_by: class:PALADIN
+    do:
+      sequence:
+        - { type: "/cast [@{who}] Blessing of Kings", to: "class:PALADIN" }
+        - { wait: 1.6s }               # one global cooldown between casts
+        - { type: "/cast [@{who}] Blessing of Might", to: "class:PALADIN" }
+        - { wait: 1.6s }               # keeps the next person's round off the global cooldown
+    cooldown: 1s
+```
+
+| Say in party | Tinkerdawn buffs |
+|---|---|
+| `paladin buff gno`, `paladin buff Gnope` | Gnope |
+| `paladin buff me` | whoever said it |
+| `paladin buff Jhemi` | Jhemi (anyone in the group, by name) |
+| `paladin buff team`, `paladin buff the team` | Tinkerdawn, Gnope, Kunth, Tinkerbow, in turn |
+| `paladin buff group`, `paladin buff party` | everyone in the party, in turn, yours or not |
+
+**How it fits together**
+- **`[@{who}]`** casts on the named person without changing the paladin's target. How `{who}` reads a name (start of a name, roles, aliases) is in [Arguments](automation.md#arguments-heal-gno-disenchant-all-).
+- **`team` / `group` become one round per person.** The first starts at once, the rest wait in the rule's queue and follow one after another. The queue limit doesn't cut them short, and asking again while it's going skips the people already queued.
+- **`group` uses the game's unit names** (`player`, `party1`–`party4`), because WoWBox can't read the names of people who aren't yours. The log shows who it meant: `{who}=group -> player, party1, party2, party3`.
+- **Asking for several people by name queues them too:** "paladin buff kunth", then "paladin buff gnope" while Kunth's round is running, puts Gnope's next.
+- **`cooldown: 1s`.** The rule waits out its cooldown between people, so a long one adds that much per person; the trailing `wait:` already keeps the rounds apart.
+- **The same works for any rule that uses `{who}`:** a shaman buff round, Earth Shield, a cleanse ("cleanse team").
+
 ## Recipe: group ports on a party keyword ("port lavastorm")
 
 Say `port lavastorm` in party from any of your characters. Kunth announces it in party and casts the port, so you don't have to swap windows or dig through the spellbook. One rule per destination, all the same shape. These are the P99 druid group ports up to Velious (Skyfire and the Emerald Jungle use Wind of the North and Wind of the South, not a Circle), cast here by the shaman (`class:SHAMAN`). Use `class:DRUID` or a name if your porter is someone else.

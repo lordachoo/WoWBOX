@@ -9,7 +9,7 @@
 - [Follow, stacking and movement mirroring](follow.md)
 - [Macros](macros.md)
 - [Automation](automation.md)
-  - [Automation recipes](automation-recipes.md): heal/buff bot, group ports
+  - [Automation recipes](automation-recipes.md): heal/buff bot, buffing the whole group, group ports
 - [WotLK slash commands for macros and automation](slash-commands.md)
 - [Layouts and configuration reference](configuration.md)
 - [Building and development](development.md)

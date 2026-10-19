@@ -41,7 +41,7 @@ In `docs/`:
 - [Follow, stacking and movement mirroring](docs/follow.md)
 - [Macros](docs/macros.md)
 - [Automation](docs/automation.md)
-  - [Automation recipes](docs/automation-recipes.md): heal/buff bot, group ports
+  - [Automation recipes](docs/automation-recipes.md): heal/buff bot, buffing the whole group, group ports
 - [WotLK slash commands for macros and automation](docs/slash-commands.md)
 - [Layouts and configuration reference](docs/configuration.md)
 - [Building and development](docs/development.md)

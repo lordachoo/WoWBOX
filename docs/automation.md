@@ -269,6 +269,8 @@ BoxBridge passes every whisper, party, raid, guild, officer, say and yell line i
 | "heal tank" | Tinkerdawn (the slot with role tank) |
 | "heal target" | `target`: Kunth's own target |
 | "heal Bob" | Bob |
+| "buff team", "buff the team" | each of your characters in turn: Tinkerdawn, Gnope, Kunth, Tinkerbow |
+| "buff group", "buff party" | everyone in the party in turn: `player`, `party1`, `party2`… |
 
 - **Everyone at once: "shaman buff team", "paladin buff group".** One request becomes one run per person: the first starts at once, the rest wait in the rule's queue and follow one after another, each with the rule's own waits (so the global cooldown is respected exactly as if you'd asked for each by name). Any rule that uses `{who}` does this; nothing to add to it.
   - `team`: your characters, in slot order: `{who}=team -> Tinkerdawn, Gnope, Kunth, Tinkerbow`.
@@ -283,6 +285,7 @@ BoxBridge passes every whisper, party, raid, guild, officer, say and yell line i
 Complete rule sets to copy, in [Automation recipes](automation-recipes.md):
 
 - [Heal and buff bot on whisper](automation-recipes.md#recipe-heal-and-buff-bot-on-whisper): Kunth heals and buffs whoever asks.
+- [Buff anyone, or the whole group](automation-recipes.md#recipe-buff-anyone-or-the-whole-group-paladin-buff-team): "paladin buff gnope", "paladin buff team", "paladin buff group".
 - [Group ports on a party keyword](automation-recipes.md#recipe-group-ports-on-a-party-keyword-port-lavastorm): "port lavastorm" in party, and Kunth announces it and casts it.
 
 Recipes for anti-AFK, running in to melee and totems are in [WotLK slash commands for macros and automation](slash-commands.md).
