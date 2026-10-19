@@ -241,7 +241,7 @@ BoxBridge passes every whisper, party, raid, guild, officer, say and yell line i
 
 `{who}` works out who "someone" is in a line like "heal &lt;someone&gt;", from the words after the matched one:
 
-1. Filler words are skipped: on, for, to, at, pls, plz, please, now, thx, ty, thanks.
+1. Filler words are skipped: on, for, to, at, the, pls, plz, please, now, thx, ty, thanks.
 2. Nothing left, or `me` / `self` / `myself` / `i`: the **sender**.
 3. `target`, `focus`, `mouseover`, `pet`, `player`, `targettarget`: used as they are, so `[@target]` is the caster's own target.
 4. A **role**: `tank`, `healer` or `dps` mean the character of the only slot with that role in `team.yaml`.
@@ -250,8 +250,9 @@ BoxBridge passes every whisper, party, raid, guild, officer, say and yell line i
    team:
      aliases: { mt: Tinkerdawn, lock: Gnope }
    ```
-6. One of your characters' names, or the **start of exactly one**: "gno" is Gnope.
-7. Anything else, as typed: someone else in your group.
+6. **`team`, `group` or `party`: one run per person** (see *Everyone at once* below).
+7. One of your characters' names, or the **start of exactly one**: "gno" is Gnope.
+8. Anything else, as typed: someone else in your group.
 
 ```yaml
   - name: heal-on-request
@@ -269,6 +270,10 @@ BoxBridge passes every whisper, party, raid, guild, officer, say and yell line i
 | "heal target" | `target`: Kunth's own target |
 | "heal Bob" | Bob |
 
+- **Everyone at once: "shaman buff team", "paladin buff group".** One request becomes one run per person: the first starts at once, the rest wait in the rule's queue and follow one after another, each with the rule's own waits (so the global cooldown is respected exactly as if you'd asked for each by name). Any rule that uses `{who}` does this; nothing to add to it.
+  - `team`: your characters, in slot order: `{who}=team -> Tinkerdawn, Gnope, Kunth, Tinkerbow`.
+  - `group` / `party`: everyone in the party, including people who aren't yours. WoWBox can't read their names, so it uses the game's: `player` and `party1`–`party4` (the ones that exist, from the client that heard the line). `/cast [@party2] …` works on whoever that is from the caster's own client, and together they're the same people from any client.
+  - The queue limit doesn't cut a team or group short. Asking again while it's still going skips the people already queued.
 - **`cooldown_per: target`** (*Cooldown per target* in the editor) keeps the cooldown separately for each `{who}`. A request for someone still on cooldown waits in the queue; requests for others go first.
 - **Item names:** `{rest}` is everything after the word: `/use {rest}`. 25 bytes of it arrive, so very long names are cut; the log and the editor's Test say so.
 - **Test it in the editor:** type a line in *Test line* (e.g. `heal on gno pls`) and press *Test*: it shows what `{who}` and the others became and the exact line it would type, without sending anything. The log also says what a firing understood, e.g. `whisper from Kunth: 'heal on gno' -> {who}='Gnope'`.

@@ -646,3 +646,33 @@ def test_one_sender_can_queue_requests_for_different_people():
     assert [t.lower() for t in typed(sender)] == ["/cast [@kunth] kings", "/cast [@kunth] might",
                                                   "/cast [@gnope] kings", "/cast [@gnope] might",
                                                   "/cast [@jhemi] kings", "/cast [@jhemi] might"]
+
+
+# ---------------------------------------------------------------- "buff team" / "buff group": one run per person
+PAL = {"name": "pal-buff", "chat": {"channel": ["party"], "contains": ["paladin buff"], "heard_by": "Kunth"},
+       "do": {"sequence": [{"type": "/cast [@{who}] Kings", "to": "Kunth"}, {"wait": "2s"}]},
+       "cooldown": "1s", "queue": 1}
+
+
+def test_buff_team_runs_once_for_each_of_your_characters():
+    e, sender = engine([PAL])
+    e.on_chat(3, whisper(text="paladin buff team", channel="party"), now=0)
+    run(e, 0, 20)
+    assert typed(sender) == ["/cast [@Tinkerdawn] Kings", "/cast [@Gnope] Kings", "/cast [@Kunth] Kings"]
+
+
+def test_buff_group_uses_the_party_units_and_ignores_the_queue_limit():
+    e, sender = engine([PAL])
+    e.source.st[3] = ClientState(name="Kunth", party_exists=(True, True, True, False))
+    e.on_chat(3, whisper(text="paladin buff the group pls", channel="party"), now=0)
+    e.on_chat(3, whisper(text="paladin buff party", channel="party"), now=0.5)  # the same people again: skipped
+    run(e, 0, 30)
+    assert typed(sender) == ["/cast [@player] Kings", "/cast [@party1] Kings", "/cast [@party2] Kings",
+                             "/cast [@party3] Kings"]
+
+
+def test_a_name_still_means_one_person():
+    e, sender = engine([PAL])
+    e.on_chat(3, whisper(text="paladin buff gnope", channel="party"), now=0)
+    run(e, 0, 10)
+    assert [t.lower() for t in typed(sender)] == ["/cast [@gnope] kings"]

@@ -196,9 +196,11 @@ def matched_word(trig: ChatTrigger, text: str) -> str | None:
     return max(hits, key=len) if hits else None
 
 
-FILLER_WORDS = {"on", "for", "to", "at", "pls", "plz", "please", "now", "thx", "ty", "thanks"}
+FILLER_WORDS = {"on", "for", "to", "at", "the", "pls", "plz", "please", "now", "thx", "ty", "thanks"}
 SELF_WORDS = {"me", "self", "myself", "i"}
 UNIT_WORDS = {"target", "focus", "mouseover", "pet", "player", "targettarget"}  # WoW's own words, used as they are
+# "shaman buff team" / "... group": one run per person. team = your characters, group = everyone in the party
+GROUP_WORDS = {"team": "team", "group": "group", "party": "group"}
 
 
 def after_word(text: str, word: str | None) -> str:
@@ -236,6 +238,8 @@ def resolve_who(rest: str, sender: str, names: set[str], aliases: dict[str, str]
         return low
     if low in aliases:
         return aliases[low]
+    if low in GROUP_WORDS:
+        return GROUP_WORDS[low]
     exact = [n for n in names if n.lower() == low]
     if exact:
         return exact[0]
@@ -642,25 +646,55 @@ class AutomationEngine:
                 continue
             self._chat_seen[key] = now
             values = self.chat_values(rt.rule.chat, ev, listener, base)
-            safe = safe_values(values)
-            target = safe["who"].lower()
-            steps, why = substitute(rt.steps, values), f"{ev.channel} from {ev.sender}: {ev.text!r}"
-            if used := _args_used(rt.steps):
-                why += " -> " + ", ".join(f"{{{k}}}={safe[k]!r}" for k in used)
-                if ev.truncated:
-                    why += " (the line was cut off: only its start arrived)"
-            busy = ("still running" if rt.running_step is not None else
-                    "on cooldown" if rt.cooling(now, target) > 0 else
-                    "others are queued first" if rt.pending else None)
-            if busy:
-                self._queue(rt, _Request(ev.sender, steps, why, now, target), busy)
+            group = values["who"] in ("team", "group") and "who" in _args_used(rt.steps)
+            if not group:
+                self._dispatch(rt, ev, values, now)
                 continue
-            if rt.rule.when is not None:
-                ok, _, matched = self._check(rt, self.source.states())
-                if not ok:
-                    continue
-                steps = substitute(steps, matched) if matched else steps
-            self._fire(rt, now, steps, why, ev.sender, target)
+            members = self._members(values["who"], slot)
+            if not members:
+                self._event(f"rule {rt.rule.name!r}: chat from {ev.sender} asks for the {values['who']}, "
+                            "but nobody is in it")
+                continue
+            self._event(f"rule {rt.rule.name!r}: {{who}}={values['who']} -> {', '.join(members)}")
+            for who in members:  # the first runs now (if it can), the others queue behind it
+                self._dispatch(rt, ev, {**values, "who": who}, now, whole_group=True)
+
+    def _members(self, group: str, slot: int) -> list[str]:
+        """Who "team" or "group" means: your characters in slot order, or everyone in the party as the game
+        names them from the caster's own client (player, party1..party4: the same people seen from any client)."""
+        states = self.source.states()
+        if group == "team":
+            live = [st.name for _, st in sorted(states.items()) if st is not None and not st.stale and st.name]
+            if live:
+                return list(dict.fromkeys(live))
+            names = getattr(self.source, "character_names", None)
+            return sorted(names()) if names else []
+        st = states.get(slot)
+        if st is None:
+            return []
+        return ["player"] + [f"party{i + 1}" for i, there in enumerate(st.party_exists) if there]
+
+    def _dispatch(self, rt: RuleRuntime, ev: ChatEvent, values: dict, now: float, whole_group: bool = False) -> None:
+        """Fire the rule for one request, or queue it if the rule is busy."""
+        safe = safe_values(values)
+        target = safe["who"].lower()
+        steps, why = substitute(rt.steps, values), f"{ev.channel} from {ev.sender}: {ev.text!r}"
+        if used := _args_used(rt.steps):
+            why += " -> " + ", ".join(f"{{{k}}}={safe[k]!r}" for k in used)
+            if ev.truncated:
+                why += " (the line was cut off: only its start arrived)"
+        busy = ("still running" if rt.running_step is not None else
+                "on cooldown" if rt.cooling(now, target) > 0 else
+                "others are queued first" if rt.pending else None)
+        if busy:
+            self._queue(rt, _Request(ev.sender, steps, why, now, target), busy, whole_group)
+            return
+        if rt.rule.when is not None:
+            ok, _, matched = self._check(rt, self.source.states())
+            if not ok:
+                return
+            steps = substitute(steps, matched) if matched else steps
+        self._fire(rt, now, steps, why, ev.sender, target)
 
     def chat_values(self, trig: ChatTrigger, ev: ChatEvent, listener: str = "",
                     base: dict[str, str] | None = None) -> dict[str, str]:
@@ -679,7 +713,7 @@ class AutomationEngine:
     def queue_limit(self, rt: RuleRuntime) -> int:
         return self.options.chat_queue if rt.rule.queue is None else rt.rule.queue
 
-    def _queue(self, rt: RuleRuntime, req: _Request, busy: str) -> None:
+    def _queue(self, rt: RuleRuntime, req: _Request, busy: str, whole_group: bool = False) -> None:
         name, who = rt.rule.name, req.sender.lower()
         # one place per person; for a rule that acts on {who} ("paladin buff gnope"), per person *and* {who},
         # so one sender can line up buffs for several people
@@ -702,14 +736,15 @@ class AutomationEngine:
             self._event(f"rule {name!r}: on cooldown, chat from {req.sender} skipped (they were just served)")
             return
         limit = self.queue_limit(rt)
-        if limit == 0:
+        if limit == 0 and not whole_group:
             self._event(f"rule {name!r}: {busy}, chat from {req.sender} skipped (queueing is off)")
             return
-        if len(rt.pending) >= limit:
+        if len(rt.pending) >= limit and not whole_group:  # "buff team" always fits in full
             self._event(f"rule {name!r}: queue full ({limit}), chat from {req.sender} skipped")
             return
         rt.pending.append(req)
-        self._event(f"rule {name!r}: {busy}, {req.sender} queued (#{len(rt.pending)})")
+        what = f"{req.sender} for {req.target}" if by_who else req.sender
+        self._event(f"rule {name!r}: {busy}, {what} queued (#{len(rt.pending)})")
 
     def _next_request(self, rt: RuleRuntime, now: float, states: dict[int, ClientState | None]) -> None:
         """Serve the next queued chat request once the rule is free and off cooldown (cooldown_per target: the
