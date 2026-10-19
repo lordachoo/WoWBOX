@@ -26,6 +26,9 @@ FEED_COLS = ["Ago", "Time", "Source", "Name", "What", "Characters"]
 QUEUE_COLORS = {"running": "#2e7d32", "macro": "#6a1b9a", "waiting": "#ef6c00", "queued": "#1565c0"}
 FEED_COLORS = {"fired": "#2e7d32", "queued": "#1565c0", "skipped": "#c62828", "done": "#757575"}
 ROW_HEIGHT = 22
+# The feed and queue size their columns once per rebuild, not live (ResizeToContents): live sizing re-measures a
+# whole column on every cell written, so a full 300-row feed took 10-30 s to rebuild and froze WoWBox.
+AGO_SAMPLE = "59m59s ago"
 RANK = {"running": 0, "macro": 0, "waiting": 1, "queued": 2}
 
 
@@ -63,7 +66,7 @@ class ActivityTab(QWidget):
         self.queue.setRootIsDecorated(False)
         self.queue.setUniformRowHeights(True)
         qh = self.queue.header()
-        qh.setSectionResizeMode(QHeaderView.ResizeToContents)
+        qh.setSectionResizeMode(QHeaderView.Interactive)
         qh.setSectionResizeMode(QUEUE_COLS.index("Detail"), QHeaderView.Stretch)
 
         # feed
@@ -74,7 +77,7 @@ class ActivityTab(QWidget):
         self.feed.setWordWrap(False)
         self.feed.verticalHeader().setDefaultSectionSize(ROW_HEIGHT)
         fh = self.feed.horizontalHeader()
-        fh.setSectionResizeMode(QHeaderView.ResizeToContents)
+        fh.setSectionResizeMode(QHeaderView.Interactive)
         fh.setSectionResizeMode(FEED_COLS.index("What"), QHeaderView.Stretch)
         self.show_rules = QCheckBox("Rules", checked=True)
         self.show_macros = QCheckBox("Macros", checked=True)
@@ -209,6 +212,7 @@ class ActivityTab(QWidget):
             return
         self._queue_sig = sig
         t = self.queue
+        t.setUpdatesEnabled(False)
         t.clear()
         for who, it in lines:
             prio = f" (priority {it.priority})" if it.priority else ""
@@ -224,6 +228,10 @@ class ActivityTab(QWidget):
             empty = QTreeWidgetItem(["", "", "Nothing running or queued."])
             empty.setForeground(2, QColor("#9e9e9e"))
             t.addTopLevelItem(empty)
+        for col in range(len(QUEUE_COLS)):
+            if col != QUEUE_COLS.index("Detail"):
+                t.resizeColumnToContents(col)
+        t.setUpdatesEnabled(True)
 
     def _shown(self, a) -> bool:
         if a.source == "rule" and not self.show_rules.isChecked():
@@ -246,6 +254,7 @@ class ActivityTab(QWidget):
             self._feed_sig = feed.version
             items = [a for a in reversed(feed.items()) if self._shown(a)]
             self._feed_rows = items
+            t.setUpdatesEnabled(False)
             t.setRowCount(len(items))
             name_col, what_col = FEED_COLS.index("Name"), FEED_COLS.index("What")
             for r, a in enumerate(items):
@@ -254,6 +263,12 @@ class ActivityTab(QWidget):
                          ", ".join(self._name(s) for s in a.slots)]
                 for col, text in enumerate(cells):
                     t.setItem(r, col, _item(text, color if col in (name_col, what_col) else None))
+            for col in range(len(FEED_COLS)):
+                if col != what_col:
+                    t.resizeColumnToContents(col)
+            ago = t.fontMetrics().horizontalAdvance(AGO_SAMPLE) + 16  # room for the Ago text to grow
+            t.setColumnWidth(0, max(t.columnWidth(0), ago))
+            t.setUpdatesEnabled(True)
         for r, a in enumerate(self._feed_rows):  # the Ago column counts up live
             text = f"{fmt_left(now - a.mono)} ago"
             it = t.item(r, 0)

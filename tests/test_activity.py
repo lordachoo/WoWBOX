@@ -115,6 +115,29 @@ def test_activity_tab_renders(qapp):
     shutil.rmtree(tmp)
 
 
+def test_a_full_feed_on_screen_rebuilds_quickly(qapp):
+    """Columns sized live (ResizeToContents) re-measured the whole column per cell written: a full 300-row feed
+    on screen took 10-30 s per rebuild, froze WoWBox mid-fight and the rules paused."""
+    from wowbox.ui.activity_tab import ActivityTab
+
+    class C:
+        activity = ActivityFeed()
+    for i in range(400):
+        C.activity.add("rule", f"rule {i}", f"fired (party from Tinkerdawn: 'buff'): type '/cast thing {i}'", [1])
+    tab = ActivityTab.__new__(ActivityTab)
+    ActivityTab.__init__(tab, type("Ctl", (), {"activity": C.activity})())
+    tab.resize(1200, 800)
+    tab.show()
+    tab._name = lambda s: f"char{s}"
+    t0 = time.perf_counter()
+    for _ in range(3):
+        tab._refresh_feed(force=True)
+        qapp.processEvents()
+    assert tab.feed.rowCount() == 300
+    assert time.perf_counter() - t0 < 2.0
+    tab.hide()
+
+
 @pytest.fixture(scope="module")
 def qapp():
     from PySide6.QtWidgets import QApplication
