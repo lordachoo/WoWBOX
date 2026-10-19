@@ -25,8 +25,9 @@ OPS: dict[str, Callable[[object, object], bool]] = {
 CLAIM_RECHECK = 0.05  # a step queued behind another rule's waiting step looks again this soon
 RULE_NAME = re.compile(r"^\s*rule (['\"])(.+?)\1")  # "rule 'heal' fired ..." -> heal
 CHAT_DEDUPE = 2.0
-# a state rule fires again at most this often, whatever its cooldown: a cast that keeps failing (out of range)
-# never goes on cooldown in the game, so its condition stays true and would fire on every tick
+# a state rule without a cooldown fires again at most this often: a cast that keeps failing (out of range) never
+# goes on cooldown in the game, so its condition stays true and would fire on every tick. A cooldown the rule sets
+# itself is kept, shorter too (a 500 ms /assist)
 STATE_MIN_GAP = 1.0  # the same party/raid line heard by several of your clients fires a rule once
 
 
@@ -552,7 +553,7 @@ class AutomationEngine:
             if rt.rule.chat is not None:
                 self._next_request(rt, now, states)
                 continue
-            gap = rt.rule.cooldown if rt.rule.every is not None else max(rt.rule.cooldown, STATE_MIN_GAP)
+            gap = rt.rule.cooldown if rt.rule.every is not None or rt.rule.cooldown > 0 else STATE_MIN_GAP
             if rt.last_fired is not None and now - rt.last_fired < gap:
                 continue
             if rt.rule.every is not None:
@@ -894,10 +895,12 @@ class AutomationEngine:
         - a rule already waiting for it goes first, unless this one has a higher priority;
         - rule_gap after another rule's last step there (the global cooldown);
         - and not while it's casting or channeling something this rule didn't start (up to cast_wait_max).
-        When it may go now, records it as the last step there and returns `now`."""
+        When it may go now, records it as the last step there and returns `now`.
+        A `gcd: false` rule (/assist, /petattack...) skips all of that and isn't recorded: the game has no global
+        cooldown for it, so it neither waits for spells nor makes the next spell wait."""
         o = self.options
         me, prio = rt.rule.name, rt.rule.priority
-        if o.rule_gap <= 0 and not o.wait_for_casts:
+        if not rt.rule.gcd or (o.rule_gap <= 0 and not o.wait_for_casts):
             return now
         later, why = now, ""
         waiting = {r.rule.name for r in self.rules if r.wait_reason}  # a claim only counts while its rule waits

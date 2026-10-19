@@ -179,7 +179,7 @@ A DoT has no cooldown, so `ready:` would recast it every few seconds. `dot:` ask
 
   Add `cant_hit: false` to the DoT rules too: starting a cast stops Interact's run, and the casts would only fail again. `cant_hit` needs something to fail first: `/startattack` on, or a cast. The game's wording varies ("Out of range" or "Out of range.", custom servers' own text), so BoxBridge matches the words *out of range*, *too far away*, *facing the wrong way* and *front of you* / *infront* (EQWOW says "Target needs to be infront of you") anywhere in the error; `/bb words` shows the last game error and whether it counted. Don't make the run-in depend on `following: true`: Interact takes the character off follow, so it would run in only on the first pull after each `/follow`.
 - **Fight only when the tank does: `attacking` and `ally_attacking`.** Running through a hostile zone, a mob that aggroes the tank puts it in combat, targeted, close by: exactly what the assist rule looks for, so the others stop and fight (and a run-in pulls them off `/follow`). Gate on the tank's auto-attack instead:
-  - the assist: `when: { slot: 1, combat: true, attacking: true, … }`;
+  - the assist: `when: { slot: 1, combat: true, attacking: true, same_target_ne: Gnope, … }` with `cooldown: 500ms`, `priority: 30` and `gcd: false`. `same_target_ne` makes it fire only while Gnope isn't on your mob yet, so it doesn't send `/assist` all fight long;
   - every rule that acts on the tank's mob (re-assist, pet, run-ins, DoTs, shots): add `ally_attacking: Tinkerdawn` next to `same_target: Tinkerdawn`.
 
   They join once you swing, boss fights included, and stop the moment your auto-attack stops: a queued DoT is dropped (*condition no longer true*). A ranged pull waits until the mob reaches you and you start swinging. `/bb words` shows *auto-attack: on/off*.
@@ -330,7 +330,7 @@ A live dashboard of everything rules and macros do. It updates four times a seco
 
 ## Common to all rules
 
-- `cooldown:` is the minimum time between firings. A state rule fires again at most once a second even without one, so a cast that keeps failing can't flood a client.
+- `cooldown:` is the minimum time between firings. A state rule without one fires again at most once a second, so a cast that keeps failing can't flood a client. A cooldown you set is kept, shorter ones too (`cooldown: 500ms` on an assist).
 - `enabled: false` keeps a rule in the file but switched off.
 - **Editing `automation.yaml` by hand** while WoWBox runs is safe: WoWBox notices within a second and loads it (the Activity tab says *automation.yaml changed on disk*), and it never saves over a newer file. If your edit has an error, WoWBox says so in the Log tab and won't save rules until it's fixed.
 - A rule that's still running its sequence won't start again (chat rules queue the request instead).
@@ -339,6 +339,7 @@ A live dashboard of everything rules and macros do. It updates four times a seco
   - **The current cast:** the cast or channel in progress (a 2.5 s Chain Heal, Drain Soul) has finished, as read from the bridge. A stuck flag holds it for at most `cast_wait_max` (10 s).
 
   A totem or heal request in the middle of a chain-heal loop goes out as soon as the current Chain Heal lands. The loop then continues after it. A rule's own steps never wait for its own casts: its *Then wait* gaps handle that. Set `rule_gap: 0` and `wait_for_casts: false` to turn this off.
+- **No global cooldown** (`gcd: false`, the editor's *No global cooldown* box): for commands the game doesn't put on the global cooldown: `/assist`, `/petattack`, `/petfollow`, `/cleartarget`, `/startattack`. The rule skips both waits above and goes out straight away, and the next spell doesn't wait for it. Without it, an assist waits 1.5 s after the last spell, the pet attack 1.5 s after the assist, and the first DoT another 1.5 s: up to 3 s on every pull. Don't use it for spells (*spell isn't ready yet*) or for moving (Interact, `/follow`): moving stops the cast in progress.
 - **On/off hotkey** (`hotkey:`, the editor's *On/off hotkey*): a key that turns the rule on or off while WoW or WoWBox has focus. **`/bb rule <name>`** in the game does the same for any rule (the start of its name is enough; if it fits several, nothing changes and the Activity tab says which).
 - **Show on the in-game panel** (`panel: true`): the party panel's second line shows the rule and whether it's on (up to 8 rules).
 - **Priority** (`priority:`, the editor's *Priority* box, default 0) decides who goes first when several rules wait for the same character: higher first, equal = first come, first served. Give totems `priority: 10` and they jump ahead of a waiting heal. It doesn't interrupt a cast already in progress.

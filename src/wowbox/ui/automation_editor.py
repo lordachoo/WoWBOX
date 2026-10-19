@@ -124,7 +124,7 @@ def build_rule(name: str, enabled: bool, cooldown: str, trigger: str, *, who: st
                conditions: list[dict] | None = None, every: str = "", channels: list[str] | None = None,
                senders: str = "", contains: str = "", heard_by: str = "all", queue: str = "",
                priority: int = 0, cooldown_per_target: bool = False, hotkey: str = "", panel: bool = False,
-               steps: list[dict]) -> AutomationRule:
+               gcd: bool = True, steps: list[dict]) -> AutomationRule:
     """Editor values -> AutomationRule. Raises ValueError with a readable message."""
     if not name.strip():
         raise ValueError("Give the rule a name.")
@@ -133,6 +133,8 @@ def build_rule(name: str, enabled: bool, cooldown: str, trigger: str, *, who: st
         data["cooldown"] = cooldown.strip()
     if priority:
         data["priority"] = priority
+    if not gcd:
+        data["gcd"] = False
     if hotkey.strip():
         data["hotkey"] = hotkey.strip()
     if panel:
@@ -298,6 +300,12 @@ class RuleEditor(QDialog):
         self.priority.setToolTip("When rules wait for the same character (its cast or global cooldown), "
                                  "the higher priority goes first. Equal: first come, first served.")
         top.addRow("Priority", self.priority)
+        self.no_gcd = QCheckBox("No global cooldown: send straight away (/assist, /petattack, /cleartarget...)")
+        self.no_gcd.setChecked(bool(rule and not rule.gcd))
+        self.no_gcd.setToolTip("For commands the game doesn't put on the global cooldown. The rule doesn't wait "
+                               "for the gap after other rules' spells or for a cast, and the next spell doesn't wait "
+                               "for it. Not for spells, or for moving (that would stop a cast).")
+        top.addRow("", self.no_gcd)
         self.hotkey = HotkeyEdit(rule.hotkey or "" if rule else "")
         self.hotkey.setToolTip("Press it (in WoW or WoWBox) to turn this rule on or off. In the game, /bb rule "
                                "<name> does the same.")
@@ -447,7 +455,7 @@ class RuleEditor(QDialog):
             senders=self.senders.text(), contains=self.contains.text(), heard_by=self.heard_by.currentText(),
             queue=self.queue.currentText(), priority=self.priority.value(),
             cooldown_per_target=self.per_target.isChecked(), hotkey=self.hotkey.text(),
-            panel=self.panel.isChecked(), steps=self.steps.read())
+            panel=self.panel.isChecked(), gcd=not self.no_gcd.isChecked(), steps=self.steps.read())
         if rule.name in self.other_names:
             raise ValueError(f"There's already a rule called {rule.name!r}.")
         if rule.hotkey and (owner := self.conflict(rule.hotkey)):

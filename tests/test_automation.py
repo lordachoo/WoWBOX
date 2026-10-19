@@ -263,3 +263,39 @@ def test_cooldown_counts_from_the_send_after_waiting_in_line():
         at += [(round(t, 2), k) for k, _ in sender.sent[n:]]
         t += 0.1
     assert [w for w, k in at if k == "F2"] == [1.5, 4.5]  # 3 s after it went out at 1.5 s, not after joining at 0
+
+
+def test_a_no_gcd_rule_skips_the_gap_and_does_not_hold_up_spells():
+    """/assist and /petattack aren't on the game's global cooldown: they went out 1.5 s after a spell and held the
+    next spell up 1.5 s, so the pet and the first DoT were 1.5-3 s late on every pull."""
+    cond = {"slot": 3, "power_pct_gt": 50}
+    rules = [{"name": "dot1", "when": cond, "do": {"send": "F1", "to": [3]}, "cooldown": "10s"},
+             {"name": "assist", "when": cond, "do": {"send": "F2", "to": [3]}, "cooldown": "500ms", "gcd": False},
+             {"name": "pet", "when": cond, "do": {"send": "F3", "to": [3]}, "cooldown": "10s", "gcd": False},
+             {"name": "dot2", "when": cond, "do": {"send": "F4", "to": [3]}, "cooldown": "10s"}]
+    e, sender, src = engine(rules, rule_gap=1.5)
+    at, t = [], 0.0
+    while t <= 2:
+        if round(t, 2) == 0.5:
+            src.st[3] = ClientState(power_pct=80, casting=True)  # a cast doesn't hold /assist up either
+        n = len(sender.sent)
+        e.tick(round(t, 2))
+        at += [(k, round(t, 2)) for k, _ in sender.sent[n:]]
+        t += 0.1
+    first = {k: w for k, w in reversed(at)}
+    assert first["F1"] == 0 and first["F2"] == 0 and first["F3"] == 0  # straight away, next to the spell
+    assert [w for k, w in at if k == "F2"][:2] == [0, 0.5]  # again on its own cooldown, mid-cast
+    src.st[3] = ClientState(power_pct=80)
+    e.tick(2.1)
+    assert ("F4", [3]) in sender.sent and [k for k, _ in sender.sent].index("F4") > 0
+    assert all(w >= 1.5 for k, w in at if k == "F4")  # the next spell still waits out the gap after dot1 only
+
+
+def test_gcd_false_is_saved_and_loaded():
+    from wowbox.rule_store import dump_rules, load_rules_text
+    cfg = AppConfig.model_validate({"automation": [
+        {"name": "a", "when": {"slot": 1}, "do": {"send": "F1", "to": [1]}, "gcd": False},
+        {"name": "b", "when": {"slot": 1}, "do": {"send": "F1", "to": [1]}}]})
+    text = dump_rules(cfg.automation)
+    assert text.count("gcd: false") == 1
+    assert [r.gcd for r in load_rules_text(text)] == [False, True]

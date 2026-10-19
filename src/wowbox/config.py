@@ -249,6 +249,9 @@ class AutomationRule(_Model):
     cooldown: Duration = 0.0
     queue: int | None = Field(default=None, ge=0, le=50)  # chat rules: requests kept while busy (None: the default)
     priority: int = Field(default=0, ge=-100, le=100)  # waiting for the same character: higher goes first
+    # false: its steps don't trigger the game's global cooldown (/assist, /petattack, /cleartarget...): they go out
+    # straight away, without waiting for rule_gap or a cast, and don't make the next spell wait for them
+    gcd: bool = True
     # chat rules: "target" keeps the cooldown per {who}, so healing Gnope doesn't hold up a heal on Kunth
     cooldown_per: Literal["rule", "target"] = "rule"
     hotkey: ChordStr | None = None  # turns the rule on/off (works while WoW or WoWBox has focus)
