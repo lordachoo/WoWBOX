@@ -1,4 +1,5 @@
--- BoxBridge junk: deletes items you don't want from your bags, silently, as they arrive. /bb junk
+-- BoxBridge junk: deletes items you don't want from your bags as they arrive, without asking. /bb junk
+-- Each one deleted or sold gets a line in chat (`messages`, /bb junk messages off for none).
 --
 -- What goes: every gray item (`grays`, on by default once junk is on) and the items on your delete list
 -- (/bb junk add). Never: Rare or better, anything on your keep list (/bb junk keep), anything in the bank.
@@ -17,6 +18,11 @@ local deleted, sold, tries, warned = 0, 0, {}, {} -- tries: bag * 100 + slot -> 
 local function p(msg) DEFAULT_CHAT_FRAME:AddMessage("|cff66ccff[BoxBridge]|r junk: " .. msg) end
 
 local function onOff(v) return v and "ON" or "off" end
+
+-- "deleted [Broken Fang] x3" (unless messages are off)
+local function told(what, link, count)
+  if db.messages then p(what .. " " .. link .. ((count or 1) > 1 and (" x" .. count) or "")) end
+end
 
 -- "Linen Cloth" from an item link or a typed name, lower case (the lists' keys)
 local function key(text) return string.lower(string.match(text, "%[(.-)%]") or text) end
@@ -79,11 +85,13 @@ local function step()
   local bag, slot, what = nextItem()
   if not bag then return false end
   local link = GetContainerItemLink(bag, slot)
+  local _, count = GetContainerItemInfo(bag, slot)
   local t = tries[bag * 100 + slot] or { link = link, n = 0 }
   tries[bag * 100 + slot], t.n = t, t.n + 1
   if what == "sell" then
     UseContainerItem(bag, slot)
     sold = sold + 1
+    told("sold", link, count)
     return true
   end
   PickupContainerItem(bag, slot)
@@ -97,6 +105,7 @@ local function step()
     ClearCursor()
   else
     deleted = deleted + 1
+    told("deleted", link, count)
   end
   return true
 end
@@ -120,6 +129,7 @@ frame:SetScript("OnEvent", function(_, event)
     if db.enabled == nil then db.enabled = false end
     if db.grays == nil then db.grays = true end
     if db.sell == nil then db.sell = false end
+    if db.messages == nil then db.messages = true end
     db.list, db.keep = db.list or {}, db.keep or {}
   elseif event == "MERCHANT_SHOW" then
     merchant = true
@@ -137,7 +147,7 @@ local function setFlag(field, word, label)
   p(label .. " " .. onOff(db[field]))
 end
 
--- /bb junk [on|off | grays on|off | sell on|off | add|remove|keep|unkeep <item> | list]
+-- /bb junk [on|off | grays on|off | sell on|off | messages on|off | add|remove|keep|unkeep <item> | list]
 function BoxBridgeJunk_Command(arg)
   if not db then return end
   local cmd, rest = string.match(arg or "", "^%s*(%S*)%s*(.-)%s*$")
@@ -148,6 +158,8 @@ function BoxBridgeJunk_Command(arg)
     setFlag("grays", string.lower(rest), "grays")
   elseif cmd == "sell" then
     setFlag("sell", string.lower(rest), "sell grays at vendors (instead of deleting them)")
+  elseif cmd == "messages" then
+    setFlag("messages", string.lower(rest), "a chat line for each item deleted or sold")
   elseif cmd == "add" or cmd == "remove" or cmd == "keep" or cmd == "unkeep" then
     local items = itemsIn(rest)
     if #items == 0 then
@@ -169,11 +181,11 @@ function BoxBridgeJunk_Command(arg)
     dirty = true
   elseif cmd == "list" or cmd == "" then
     p("auto-delete " .. onOff(db.enabled) .. " | grays " .. onOff(db.grays) .. " | sell grays at vendors "
-      .. onOff(db.sell) .. " | " .. deleted .. " deleted, " .. sold .. " sold since login")
+      .. onOff(db.sell) .. " | messages " .. onOff(db.messages) .. " | " .. deleted .. " deleted, " .. sold .. " sold since login")
     p("delete list: " .. sorted(db.list))
     p("keep list: " .. sorted(db.keep))
   else
-    p("usage: /bb junk [on | off | grays on|off | sell on|off | add <item> | remove <item> | keep <item> | "
-      .. "unkeep <item> | list]")
+    p("usage: /bb junk [on | off | grays on|off | sell on|off | messages on|off | add <item> | remove <item> | "
+      .. "keep <item> | unkeep <item> | list]")
   end
 end

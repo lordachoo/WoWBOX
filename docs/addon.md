@@ -39,7 +39,7 @@ Settings are saved per character.
 
 ## Auto-delete junk (`/bb junk`)
 
-Deletes junk from your bags as it arrives, without asking and without a chat line: every gray item, and the items on your own delete list. Off until you turn it on.
+Deletes junk from your bags as it arrives, without asking: every gray item, and the items on your own delete list. Each item deleted or sold gets one line in chat (*junk: deleted [Broken Fang] x3*). Off until you turn it on.
 
 | Command | Does |
 |---|---|
@@ -49,6 +49,7 @@ Deletes junk from your bags as it arrives, without asking and without a chat lin
 | `/bb junk keep <item>`, `/bb junk unkeep <item>` | The keep list: never deleted, gray or not (a gray you need for a quest). |
 | `/bb junk grays on/off` | Delete every gray item (on by default once auto-delete is on). Off: only your list goes. |
 | `/bb junk sell on/off` | Grays wait for a vendor instead, and are sold when you open one (grays without a vendor price are still deleted). Off by default. |
+| `/bb junk messages on/off` | The chat line for each item deleted or sold (on by default). Off: completely silent. |
 | `/bb junk`, `/bb junk list` | Show the settings, both lists, and how many items it deleted and sold since login. |
 
 - **For the whole team:** `/bb all bb junk on`, `/bb all bb junk add Linen Cloth`. Each character keeps its own settings and lists.

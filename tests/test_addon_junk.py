@@ -176,3 +176,20 @@ def test_never_the_bank(g):
     bb(g, "junk on")
     run(g)
     assert lst(g.deletes) == []
+
+
+def test_a_chat_line_for_each_item_unless_messages_are_off(g):
+    lines = []
+    g.DEFAULT_CHAT_FRAME.AddMessage = lambda self, msg: lines.append(msg)
+    put(g, 0, 1, "Broken Fang", 0)
+    put(g, 0, 2, "Cracked Bone", 0)
+    bb(g, "junk on")
+    run(g)
+    deleted = [ln for ln in lines if "deleted" in ln and "since login" not in ln]
+    assert len(deleted) == 2 and "[Broken Fang]" in deleted[0]
+    bb(g, "junk messages off")
+    lines.clear()
+    put(g, 0, 3, "Broken Fang", 0)
+    fire(g, "BAG_UPDATE", 0)
+    run(g)
+    assert lst(g.deletes)[-1] == "Broken Fang" and not [ln for ln in lines if "deleted" in ln]
