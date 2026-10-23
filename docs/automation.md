@@ -41,6 +41,7 @@ automation:
 - **Fields:** `health_pct`, `power_pct`, `power_type`, `target_exists`, `target_hostile`, `target_dead`, `target_is_player`, `target_in_combat`, `target_health_pct`, `combat`, `resting`, `in_party`, `in_raid`, `typing`, `chat_open`, `casting`, `channeling`, `mounted`, `dead`, `ghost`, `afk`, `following`, `level`, `position_ok`, `map_x`, `map_y`, `facing`, `map_id`, `fps`.
 - **`ready: <spell>`:** that spell could be cast now: known, off its cooldown *and* the global cooldown, with enough mana or rage, and for a spell cast at your target, the target in range (*spell ready* in the editor's field list). `ready_ne` is the opposite; a list (`ready: [Holy Shield, Consecration]`) needs all of them. See *Keep a spell on cooldown* below.
 - **`dot: <spell>`:** that DoT should go on the target now: castable (as for `ready:`), and not on the target from *you*, or with less than 2 seconds left (*DoT needed* in the editor). See *Keep DoTs up* below.
+- **`buff_missing: <spell>`:** that buff should be cast on yourself now: castable (off cooldown, enough mana) and not on you, or with less than 10 seconds left (*Buff on yourself needed* in the editor). See *Keep a buff on yourself* below.
 - **`target_range: <yards>`:** how far the target is, measured by the game in steps: 10, 28, or 100 (farther, or no target); e.g. `target_range_lte: 10`. An older BoxBridge reports 999 (unknown). See *Fight only the tank's mob* below.
 - **`attacking: true`:** this character's auto-attack is on. Unlike `combat`, which a mob that only chases you also sets, this is "I'm fighting it". Needs BoxBridge 1.6.
 - **`ally_attacking: <name|slot>`:** that character's auto-attack is on, e.g. `ally_attacking: Tinkerdawn` on the warlock's DoTs. See *Fight only when the tank does* below.
@@ -119,6 +120,22 @@ A DoT has no cooldown, so `ready:` would recast it every few seconds. `dot:` ask
 - **The debuff must have the spell's name.** If a spell's debuff is called something else on your server, the DoT never looks "on" and the rule recasts it every cooldown; `/bb words` (with a target) shows each watched DoT as *on your target*, *NEEDED* or *not castable now*.
 - **Up to 14 DoTs**, written into `Words.lua` (`dots`) like the watched spells; after adding one, `/bb all reload`.
 
+## Keep a buff on yourself: `buff_missing:`
+
+A timed self-buff (Call of the Predator, Inner Fire, a seal) has to be recast when it runs out, after you die, or when it's dispelled. `buff_missing:` asks BoxBridge whether it's on you, so the rule casts only then:
+
+```yaml
+  - name: HUNTER call of the predator
+    when: { slot: 4, buff_missing: Call of the Predator, mounted: false }
+    do: { type: "/cast [@player] Call of the Predator", to: "class:HUNTER" }
+    cooldown: 5s
+```
+
+- **On you, by the buff's name.** If the buff is called something else than the spell on your server, it never looks "on" and the rule recasts it every cooldown; `/bb words` shows each watched buff as *on you*, *NEEDED* or *not castable now*.
+- **Renewed early:** less than 10 seconds left counts as gone. A buff with no end (an aura) counts as on.
+- **Castable only:** out of mana or on cooldown, it isn't "missing" yet, so the rule waits instead of failing.
+- **Up to 4 buffs** across all your rules, written into `Words.lua` (`buffs`). Needs BoxBridge 1.7; after adding one, `/bb all reload`.
+
 ## Fight only the tank's mob: `same_target:`
 
 `/assist` can leave a character on the wrong mob: one the tank only clicked or tabbed to, or an old target when the assist didn't take (the tank had no target at that moment). That mob is "hostile" and soon "in combat" too, so `target_hostile` and `target_in_combat` can't tell it from the tank's, and a pet sent at it brings the whole pack back. Every BoxBridge (1.4 or newer) shows which mob its target is, so WoWBox can compare:
@@ -183,7 +200,7 @@ A DoT has no cooldown, so `ready:` would recast it every few seconds. `dot:` ask
   - every rule that acts on the tank's mob (re-assist, pet, run-ins, DoTs, shots): add `ally_attacking: Tinkerdawn` next to `same_target: Tinkerdawn`.
 
   They join once you swing, boss fights included, and stop the moment your auto-attack stops: a queued DoT is dropped (*condition no longer true*). A ranged pull waits until the mob reaches you and you start swinging. `/bb words` shows *auto-attack: on/off*.
-- **Every client needs BoxBridge 1.4** (1.5 for `cant_hit`, 1.6 for `attacking`). An older one reports no target, so `same_target` is never true there and those rules wait. `/bb words` shows the target's id: two characters on the same mob show the same number.
+- **Every client needs BoxBridge 1.4** (1.5 for `cant_hit`, 1.6 for `attacking`, 1.7 for `buff_missing`). An older one reports no target, so `same_target` is never true there and those rules wait. `/bb words` shows the target's id: two characters on the same mob show the same number.
 
 ## Timers: `every:`
 

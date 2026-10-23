@@ -9,8 +9,8 @@ Matching mirrors the engine: a line passes when its channel is listed and its te
 channel's words (any case). A channel listed as "all" passes every line (a rule without words).
 
 It also carries lists for the addon: `spells`, the spells `ready:` conditions ask about (the addon reports which
-of them could be cast now), `dots`, the DoTs `dot:` conditions ask about (which should go on the target now), and
-`panel`, the rules shown on the in-game panel (`panel: true`).
+of them could be cast now), `dots`, the DoTs `dot:` conditions ask about (which should go on the target now),
+`buffs`, the buffs `buff_missing:` conditions ask about (which should be cast on yourself now), and `panel`, the rules shown on the in-game panel (`panel: true`).
 """
 from __future__ import annotations
 
@@ -27,6 +27,7 @@ log = logging.getLogger(__name__)
 CHANNELS: tuple[str, ...] = typing.get_args(ChatChannel)  # whisper, party, raid, guild, officer, say, yell
 MAX_SPELLS = 7  # ready bits in the state frame (decoder.MAX_WATCHED_SPELLS)
 MAX_DOTS = 14  # DoT bits in the state frame (decoder.MAX_DOTS)
+MAX_BUFFS = 4  # buff bits in the state frame (decoder.MAX_BUFFS)
 MAX_PANEL_RULES = 8  # bits after WoWBox's flags in the panel keys (panel.py)
 MAX_VERSION = 63  # the addon reports it in 6 bits; 0 = no list (it passes everything)
 FILE_NAME = "Words.lua"
@@ -39,6 +40,7 @@ class ChatFilter:
     channels: dict[str, tuple[str, ...] | str]  # channel -> words (lower case), or "all"
     spells: tuple[str, ...] = ()  # watched spells, as written in the rules
     dots: tuple[str, ...] = ()  # watched DoTs
+    buffs: tuple[str, ...] = ()  # watched buffs (on yourself)
     panel: tuple[str, ...] = ()  # names of the rules on the in-game panel
 
     def passes(self, channel: str, text: str) -> bool:
@@ -85,12 +87,15 @@ def build(rules: list[AutomationRule], chat: bool = True) -> ChatFilter:
     dots = spells_asked(rules, ("dot", "dot_ne"))
     if len(dots) > MAX_DOTS:
         log.warning("only %d DoTs can be watched; ignored: %s", MAX_DOTS, ", ".join(dots[MAX_DOTS:]))
+    buffs = spells_asked(rules, ("buff_missing", "buff_missing_ne"))
+    if len(buffs) > MAX_BUFFS:
+        log.warning("only %d buffs can be watched; ignored: %s", MAX_BUFFS, ", ".join(buffs[MAX_BUFFS:]))
     panel = [r.name for r in rules if r.panel]
     if len(panel) > MAX_PANEL_RULES:
         log.warning("only %d rules fit on the in-game panel; left off: %s", MAX_PANEL_RULES,
                     ", ".join(panel[MAX_PANEL_RULES:]))
     extra = {"spells": tuple(spells[:MAX_SPELLS]), "dots": tuple(dots[:MAX_DOTS]),
-             "panel": tuple(panel[:MAX_PANEL_RULES])}
+             "buffs": tuple(buffs[:MAX_BUFFS]), "panel": tuple(panel[:MAX_PANEL_RULES])}
     if not chat:
         return ChatFilter({ch: ALL for ch in CHANNELS}, **extra)
     found: dict[str, set[str] | str] = {}
@@ -118,7 +123,7 @@ def body(f: ChatFilter) -> str:
         value = _lua_string(ALL) if words == ALL else "{ " + ", ".join(_lua_string(w) for w in words) + " }"
         lines.append(f"    {ch} = {value},")
     out = "  channels = {\n" + "\n".join(lines) + ("\n" if lines else "") + "  },\n"
-    for key in ("spells", "dots", "panel"):  # only when used: an unchanged file keeps its version
+    for key in ("spells", "dots", "buffs", "panel"):  # only when used: an unchanged file keeps its version
         if names := getattr(f, key):
             out += f"  {key} = {{ " + ", ".join(_lua_string(n) for n in names) + " },\n"
     return out
@@ -146,7 +151,7 @@ def parse(text: str) -> ChatFilter | None:
     for ch, value in _CHANNEL_RE.findall(block):
         found = _strings(value)
         channels[ch] = ALL if not value.startswith("{") and found == (ALL,) else found
-    extra = {key: _strings(m.group(1)) for key in ("spells", "dots", "panel")
+    extra = {key: _strings(m.group(1)) for key in ("spells", "dots", "buffs", "panel")
              if (m := re.search(rf"^\s*{key}\s*=\s*(\{{.*?\}})\s*,\s*$", text, re.M))}
     return ChatFilter(channels, **extra)
 

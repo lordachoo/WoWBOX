@@ -260,3 +260,36 @@ def test_dots_needed(gd):
     # Splurt: only someone else's on the target -> mine is missing. Unknown Spell: not castable -> no.
     assert st.dot_bits == 0b01010
     assert st.power_type == 0 and st.target_exists and not st.typing  # the bytes' own bits are untouched
+
+
+BUFF_STUBS = r"""
+BoxBridgeWords.buffs = { "Call of the Predator", "Trueshot Aura", "Fading Buff", "Out Of Mana Buff", "Unknown Buff" }
+CD["Call of the Predator"], CD["Trueshot Aura"], CD["Fading Buff"] = { 0, 0 }, { 0, 0 }, { 0, 0 }
+CD["Out Of Mana Buff"] = { 0, 0 }
+NOMANA["Out Of Mana Buff"] = true
+RANGE["Call of the Predator"] = 0  -- a buff: a far-away target must not matter
+BUFFS = { ["Trueshot Aura"] = 0, ["Fading Buff"] = 4 }  -- seconds left (0: no end)
+function UnitBuff(unit, name)
+  local left = unit == "player" and BUFFS[name]
+  if left then return name, nil, nil, 0, nil, 0, left == 0 and 0 or now + left end
+end
+"""
+
+
+@pytest.fixture
+def gb():
+    lua = lua51.LuaRuntime(unpack_returned_tuples=True)
+    lua.execute(STUBS + PANEL_STUBS + SPELL_STUBS + BUFF_STUBS)
+    for f in ("BoxBridge.lua", "BoxBridgePanel.lua"):
+        lua.execute((ADDON / f).read_text(encoding="utf-8"))
+    g = lua.globals()
+    fire(g, "PLAYER_LOGIN")
+    return g
+
+
+def test_buffs_needed(gb):
+    st = state_frame(gb)
+    # Call of the Predator: not on me -> cast (a target out of range doesn't matter). Trueshot Aura: on, no end ->
+    # no. Fading Buff: 4 s left -> recast. Out Of Mana Buff: not castable -> no. Unknown Buff: not mine -> no.
+    assert st.buff_bits == 0b0101
+    assert not st.dead

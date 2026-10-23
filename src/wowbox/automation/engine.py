@@ -101,9 +101,9 @@ def _find_state(states: dict[int, ClientState | None], who: object) -> ClientSta
 def compile_condition(cond: Condition) -> list[tuple[str, Callable[[object, object], bool], object]]:
     preds = []
     for key, value in (cond.model_extra or {}).items():
-        if key in ("ready", "ready_ne", "dot", "dot_ne"):  # names in a list the bridge reports
-            fld = key.removesuffix("_ne")
-            preds.append((fld + "s" if fld == "dot" else fld, _not_ready if key.endswith("_ne") else _ready, value))
+        if key in ("ready", "ready_ne", "dot", "dot_ne", "buff_missing", "buff_missing_ne"):  # names in a list
+            fld = {"ready": "ready", "dot": "dots", "buff_missing": "buffs"}[key.removesuffix("_ne")]  # the bridge
+            preds.append((fld, _not_ready if key.endswith("_ne") else _ready, value))  # reports
             continue
         if key in ("same_target", "same_target_ne"):  # compared with another character's state (condition_report)
             preds.append(("target_id", _other_target if key.endswith("_ne") else _same_target, value))
@@ -171,6 +171,9 @@ def condition_report(cond: Condition, states: dict[int, ClientState | None], pre
                 per.append((slot, False, f"{_show(val)} {'not ready' if fn is _ready else 'ready'}"))
             elif fld == "dots":
                 why = "not needed (on the target, or not castable)" if fn is _ready else "needed"
+                per.append((slot, False, f"{_show(val)} {why}"))
+            elif fld == "buffs":
+                why = "not needed (on you, or not castable)" if fn is _ready else "needed"
                 per.append((slot, False, f"{_show(val)} {why}"))
             else:
                 per.append((slot, False, f"{fld} is {_show(getattr(st, fld))}, needs {OP_WORDS.get(fn, '?')} "
@@ -583,11 +586,12 @@ class AutomationEngine:
         return ok, per, self._matched_values(rt, per, states) if ok else {}
 
     def _still_holds(self, rt: RuleRuntime) -> bool:
-        """The condition again when a waiting rule's turn comes, without `ready:` and `dot:`: the cast of the
-        rule before it has just put every spell on the global cooldown, so those read "not now" for a moment."""
+        """The condition again when a waiting rule's turn comes, without `ready:`, `dot:` and `buff_missing:`:
+        the cast of the rule before it has just put every spell on the global cooldown, so those read "not now" for a
+        moment."""
         assert rt.rule.when is not None
         states = self.source.states()
-        preds = [p for p in rt.preds if p[0] not in ("ready", "dots")]
+        preds = [p for p in rt.preds if p[0] not in ("ready", "dots", "buffs")]
         return condition_report(rt.rule.when, states, preds, self.options.skip_dead, self._far(rt, states))[0]
 
     def _far(self, rt: RuleRuntime, states: dict[int, ClientState | None]) -> dict[int, str]:

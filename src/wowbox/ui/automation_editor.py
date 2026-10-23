@@ -47,6 +47,7 @@ FIELDS = [
     ("fps", "frames per second", "number"),
     ("ready", "spell ready (can be cast now; = a spell name, e.g. Avenger's Shield)", "text"),
     ("dot", "DoT needed (castable, and not on the target from you; = a spell name, e.g. Corruption)", "text"),
+    ("buff_missing", "Buff on yourself needed (castable, and not on you or under 10 s left; = a spell name)", "text"),
     ("same_target", "same target as (= a character name or slot, e.g. Tinkerdawn)", "text"),
     ("ally_attacking", "auto-attack is on for (= a character name or slot, e.g. Tinkerdawn)", "text"),
 ]

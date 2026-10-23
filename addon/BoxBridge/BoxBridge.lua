@@ -148,8 +148,9 @@ end
 -- watched spells (Words.lua `spells`, what WoWBox's `ready:` conditions ask about): bit i set while spell i+1
 -- could be cast now: known, off its cooldown and the global cooldown, enough mana/rage, and (for a spell cast at
 -- your target) the target in range: a shot from too close fails without going on cooldown, so it'd stay "ready"
-local MAX_SPELLS, MAX_DOTS = 7, 14
+local MAX_SPELLS, MAX_DOTS, MAX_BUFFS = 7, 14, 4
 local DOT_REFRESH = 2 -- a DoT of yours with less than this left counts as gone: cast it again
+local BUFF_REFRESH = 10 -- a buff on you with less than this left counts as gone: cast it again
 
 local function castable(name)
   local start, duration, enabled = GetSpellCooldown(name)
@@ -185,6 +186,33 @@ local function dotsNeeded()
   for i, name in ipairs(f.dots) do
     if i > MAX_DOTS then break end
     if castable(name) and not myDot(name) then v = v + 2 ^ (i - 1) end
+  end
+  return v
+end
+
+-- is the buff `name` on me, with more than BUFF_REFRESH seconds left (or no end)?
+local function myBuff(name)
+  local found, _, _, _, _, _, expires = UnitBuff("player", name)
+  if not found then return false end
+  return not expires or expires == 0 or expires - GetTime() > BUFF_REFRESH
+end
+
+-- can I cast `name` now (cooldown, global cooldown, mana)? Unlike castable(), the target doesn't matter: a buff
+-- goes on me
+local function castableOnMe(name)
+  local start, duration, enabled = GetSpellCooldown(name)
+  return start and enabled == 1 and (start == 0 or duration == 0) and IsUsableSpell(name) and true or false
+end
+
+-- watched buffs (Words.lua `buffs`, what WoWBox's `buff_missing:` conditions ask about): bit i set while buff i+1
+-- should be cast on me now: castable, and not on me or about to run out
+local function buffsNeeded()
+  local f = BoxBridgeWords
+  if type(f) ~= "table" or type(f.buffs) ~= "table" then return 0 end
+  local v = 0
+  for i, name in ipairs(f.buffs) do
+    if i > MAX_BUFFS then break end
+    if castableOnMe(name) and not myBuff(name) then v = v + 2 ^ (i - 1) end
   end
   return v
 end
@@ -248,7 +276,8 @@ local function u16(out, n)
 end
 
 -- map position, facing, map and frame rate, for stacking: 11 bytes (see decoder.py)
-local function addPosition(out)
+-- buffs: buffsNeeded(), 4 bits: 1-3 ride in the top of the dungeon-level byte, 4 in the top bit of the fps byte
+local function addPosition(out, buffs)
   local x, y = GetPlayerMapPosition("player")
   local mapShown = WorldMapFrame and WorldMapFrame:IsShown() -- you may be looking at another zone's map
   local valid = x and y and not (x == 0 and y == 0) and not mapShown
@@ -260,8 +289,9 @@ local function addPosition(out)
   u24(out, math.max(0, math.min(1, y)) * 16777215)
   u16(out, facing / (2 * math.pi) * 65536)
   u16(out, mapId)
-  out[#out + 1] = (valid and 1 or 0) + (level % 128) * 2
-  out[#out + 1] = math.min(255, math.floor((GetFramerate and GetFramerate() or 0) + 0.5))
+  out[#out + 1] = (valid and 1 or 0) + (level % 16) * 2 + (buffs % 8) * 32
+  out[#out + 1] = math.min(127, math.floor((GetFramerate and GetFramerate() or 0) + 0.5))
+    + math.floor(buffs / 8) % 2 * 128
 end
 
 -- GetPlayerMapPosition is relative to the map the world map shows: keep that on the zone you're in
@@ -360,7 +390,7 @@ local function snapshot()
   d[#d + 1] = id % 256
   d[#d + 1] = (CLASS_IDS[classToken or ""] or 0) + targetRange() * 16 + (cantHit() and 64 or 0)
     + (attacking and 128 or 0)
-  addPosition(d)
+  addPosition(d, buffsNeeded())
   return d
 end
 
@@ -539,6 +569,13 @@ local function bbCommand(msg)
           local why = not UnitExists("target") and "no target" or myDot(name) and "on your target"
             or not castable(name) and "not castable now (cooldown, mana, range or unknown)" or "NEEDED"
           p("  watched DoT: " .. name .. " (" .. why .. ")")
+        end
+      end
+      if type(BoxBridgeWords.buffs) == "table" then
+        for _, name in ipairs(BoxBridgeWords.buffs) do
+          local why = myBuff(name) and "on you" or not castableOnMe(name)
+            and "not castable now (cooldown, mana or unknown)" or "NEEDED"
+          p("  watched buff: " .. name .. " (" .. why .. ")")
         end
       end
       p("target id: " .. (UnitExists("target") and (targetId() .. " (characters on the same mob show the same id)")

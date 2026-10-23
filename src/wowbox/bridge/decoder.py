@@ -22,14 +22,17 @@ Byte stream (2 bytes per block):
     45-47  map y, same
     48-49  facing, 0-65535 = 0-2pi radians (GetPlayerFacing: 0 = north, counter-clockwise)
     50-51  map area id (GetCurrentMapAreaID)
-    52  bit 0: position valid, bits 1-7: map dungeon level
-    53  frames per second (GetFramerate, max 255)
+    52  bit 0: position valid, bits 1-4: map dungeon level; bits 5-7: watched buffs 1-3 needed
+    53  frames per second (GetFramerate, max 127); bit 7: watched buff 4 needed
     54  sum(bytes 0..53) % 256                      55  xor(bytes 0..53)
 
 Watched spells are the `spells` list in Words.lua (the spells `ready:` conditions ask about): a bit is set while
 that spell could be cast now, off its cooldown and the global cooldown. Older addons leave them 0.
 DoTs are the `dots` list (what `dot:` conditions ask about): a bit is set while that spell should go on the target
 now: castable, and not on the target from you (or about to run out).
+Buffs are the `buffs` list (what `buff_missing:` conditions ask about): a bit is set while that buff should be cast
+on yourself now: castable, and not on you (or about to run out). Before BoxBridge 1.7, byte 52 bits 5-7 were the
+dungeon level's high bits and byte 53 the full fps: WoWBox only reads buff bits through the list the client loaded.
 
 Older addons sent 0x0B as the second magic byte with a 24-byte name, a 12-byte class token in 42-53 and
 no position; those frames still decode. 0x0D (16-bit positions) is rejected with a hint to /reload.
@@ -72,6 +75,7 @@ CHAT_AFTER_WORD = CHAT_TEXT_BYTES.stop - CHAT_TEXT_BYTES.start - 2  # bytes of t
 NUM_BYTES = 56
 MAX_WATCHED_SPELLS = 7
 MAX_DOTS = 14
+MAX_BUFFS = 4
 RANGE_UNKNOWN = 999  # an older addon: no distance, so `target_range_lte` is never true
 TARGET_RANGES = (RANGE_UNKNOWN, 10, 28, 100)  # yards, by the 2 bits in byte 41 (100: farther, or no target)
 NUM_BLOCKS = NUM_BYTES // 2
@@ -146,6 +150,8 @@ class ClientState:
     ready: tuple[str, ...] = ()  # those spells by name, lower case (filled in by WoWBox from the list the client loaded)
     dot_bits: int = 0  # bit i: DoT i+1 (Words.lua `dots`) should go on the target now
     dots: tuple[str, ...] = ()  # those DoTs by name, lower case
+    buff_bits: int = 0  # bit i: buff i+1 (Words.lua `buffs`) should be cast on yourself now
+    buffs: tuple[str, ...] = ()  # those buffs by name, lower case
     target_range: int = RANGE_UNKNOWN  # yards to the target, measured by the game: 10, 28, 100 (farther / none)
     attacking: bool = False  # auto-attack is on (PLAYER_ENTER_COMBAT): fighting on purpose, not just chased
     cant_hit: bool = False  # the game just said "facing the wrong way" / "too far away" / "out of range" (last 3 s, same target)
@@ -318,7 +324,8 @@ def _u24(d: bytes, i: int) -> int:
 
 def _position(d: bytes) -> dict:
     return dict(position_ok=bool(d[52] & POS_VALID), map_x=_u24(d, 42) / U24_MAX, map_y=_u24(d, 45) / U24_MAX,
-                facing=_u16(d, 48) / 65536.0 * 2 * math.pi, map_id=_u16(d, 50), map_level=d[52] >> 1, fps=d[53])
+                facing=_u16(d, 48) / 65536.0 * 2 * math.pi, map_id=_u16(d, 50), map_level=d[52] >> 1 & 15,
+                fps=d[53] & 127, buff_bits=d[52] >> 5 | (d[53] >> 7) << 3)
 
 
 def encode_bytes(values: dict, frame: int) -> list[int]:
@@ -344,10 +351,12 @@ def encode_bytes(values: dict, frame: int) -> list[int]:
         for n in (round(x * U24_MAX), round(y * U24_MAX)):
             data += [n >> 16, (n >> 8) & 255, n & 255]
         fx = round(facing / (2 * math.pi) * 65536) % 65536
-        data += [fx >> 8, fx & 255, map_id >> 8, map_id & 255, POS_VALID | (level << 1)]
+        data += [fx >> 8, fx & 255, map_id >> 8, map_id & 255, POS_VALID | (level & 15) << 1]
     else:
         data += [0] * 11
-    data.append(v.get("fps", 60))
+    buffs = v.get("buff_bits", 0)
+    data[52] |= (buffs & 7) << 5
+    data.append(min(127, v.get("fps", 60)) | (buffs >> 3 & 1) << 7)
     data += list(checksum(data))
     assert len(data) == NUM_BYTES
     return data

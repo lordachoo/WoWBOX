@@ -295,3 +295,31 @@ def test_ally_attacking_condition():
     by_slot = Condition.model_validate({"slot": 2, "ally_attacking": 1})
     assert condition_report(by_slot, {1: tank, 2: nec})[0]
     assert not condition_report(by_slot, {2: nec})[0]  # no data from the tank: don't fight
+
+
+# ---------------------------------------------------------------- buffs on yourself: `buff_missing:`
+def test_buff_bits_ride_in_spare_bits():
+    pos = (0.25, 0.75, 1.0, 4720, 9)
+    strip = encode({"buff_bits": 0b1011, "pos": pos, "fps": 144}, 3, 8)
+    img = np.full((strip.shape[0] + 10, strip.shape[1] + 40, 3), 37, dtype=np.uint8)
+    img[: strip.shape[0], : strip.shape[1]] = strip
+    st = decode(img)
+    assert st.buff_bits == 0b1011 and st.map_level == 9 and st.fps == 127 and st.map_id == 4720 and st.position_ok
+
+
+def test_buffs_list_and_condition():
+    rules = [rule("cotp", {"slot": 4, "buff_missing": "Call of the Predator"}), AVENGER]
+    f = words.build(rules)
+    assert f.buffs == ("Call of the Predator",) and f.spells == ("Avenger's Shield",)
+    assert words.parse(words.lua(f, 3)) == f
+    cond = Condition.model_validate({"slot": 4, "buff_missing": "call of the predator"})
+    assert condition_report(cond, {4: ClientState(buffs=("call of the predator",))})[0]
+    ok, per = condition_report(cond, {4: ClientState()})
+    assert not ok and "not needed" in per[0][2]
+
+
+def test_bridge_state_gets_buff_names(c):
+    c._store_rules(list(c.cfg.automation) + [rule("cotp", {"slot": 4, "buff_missing": "Call of the Predator"})])
+    st = ClientState(chat_filter=c.words_version, buff_bits=1)
+    c._on_bridge_state(4, st)
+    assert st.buffs == ("call of the predator",)
