@@ -632,6 +632,9 @@ local function bbCommand(msg)
   elseif cmd == "panel" then
     if BoxBridgePanel_Command then BoxBridgePanel_Command(string.lower(arg or "")) end
     return
+  elseif cmd == "junk" then
+    if BoxBridgeJunk_Command then BoxBridgeJunk_Command(arg or "") end
+    return
   elseif cmd == "status" then
     p(string.format("enabled=%s size=%d height=%s (using %d) hz=%d chat=%s chat filter=%s dropped=%d",
       tostring(db.enabled), db.size, tostring(db.height), renderHeight(), db.hz, tostring(db.chat),
@@ -639,7 +642,7 @@ local function bbCommand(msg)
     return
   else
     p("usage: /bb [all|others <command> | to <who> <command> | stack | follow | stay | mirror | rule <name> | panel | "
-      .. "size <px> | height <px> | hz <n> | chat | words | test <Name> <text> | status]")
+      .. "junk | size <px> | height <px> | hz <n> | chat | words | test <Name> <text> | status]")
     return
   end
   apply()

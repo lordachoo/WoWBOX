@@ -2,7 +2,7 @@
 
 [← README](../README.md) · [All docs](README.md)
 
-Copy `addon\BoxBridge` to `<WoW>\Interface\AddOns\BoxBridge` and enable it on the character screen for **every** character. After updating the addon, `/reload` every client. When an update adds a file to the addon (as 1.1 added `Words.lua` and 1.3 `BoxBridgePanel.lua`), **quit and restart** the clients instead: WoW reads an addon's list of files only at start-up.
+Copy `addon\BoxBridge` to `<WoW>\Interface\AddOns\BoxBridge` and enable it on the character screen for **every** character. After updating the addon, `/reload` every client. When an update adds a file to the addon (as 1.1 added `Words.lua`, 1.3 `BoxBridgePanel.lua` and 1.8 `BoxBridgeJunk.lua`), **quit and restart** the clients instead: WoW reads an addon's list of files only at start-up.
 
 A thin strip of coloured squares appears in the top-left corner. That's the bridge: leave it visible, and don't cover it with other UI. WoWBox works without the bridge, but then you lose:
 - live status;
@@ -25,6 +25,7 @@ All in-game commands (`/bb` is short for `/boxbridge`):
 | `/bb mirror` | Movement mirroring on / off. |
 | `/bb rule <name>` | Turn a WoWBox automation rule on or off. The start of its name is enough: `/bb rule holy`. |
 | `/bb panel` | Show or hide the party panel on this character (see below). `/bb panel alert` turns the follow warning on or off; `/bb panel reset` puts the panel back in its default place. |
+| `/bb junk` | Auto-delete gray items and your own list of junk, silently (see below). `/bb junk on`, `/bb junk add <item>` |
 | `/bb` | Turn the strip on or off. |
 | `/bb status` | Show the current settings. |
 | `/bb size <px>` | Block size, 2–32 (default 8). Bigger copes better with small windows. Also set `bridge.block_size` in `team.yaml` to match. |
@@ -35,6 +36,26 @@ All in-game commands (`/bb` is short for `/boxbridge`):
 | `/bb test <Name> <text>` | Pretend `<Name>` whispered `<text>`, for testing chat automation. It says so if the chat filter drops it. |
 
 Settings are saved per character.
+
+## Auto-delete junk (`/bb junk`)
+
+Deletes junk from your bags as it arrives, without asking and without a chat line: every gray item, and the items on your own delete list. Off until you turn it on.
+
+| Command | Does |
+|---|---|
+| `/bb junk on`, `/bb junk off` | Turn auto-delete on or off for this character. |
+| `/bb junk add <item>` | Put an item on the delete list: shift-click it (from your bags or a chat link) or type its name, any case. Several shift-clicked items in one line all go on. |
+| `/bb junk remove <item>` | Take it off the delete list. |
+| `/bb junk keep <item>`, `/bb junk unkeep <item>` | The keep list: never deleted, gray or not (a gray you need for a quest). |
+| `/bb junk grays on/off` | Delete every gray item (on by default once auto-delete is on). Off: only your list goes. |
+| `/bb junk sell on/off` | Grays wait for a vendor instead, and are sold when you open one (grays without a vendor price are still deleted). Off by default. |
+| `/bb junk`, `/bb junk list` | Show the settings, both lists, and how many items it deleted and sold since login. |
+
+- **For the whole team:** `/bb all bb junk on`, `/bb all bb junk add Linen Cloth`. Each character keeps its own settings and lists.
+- **Never deleted:** anything Rare (blue) or better, even if it's on your list (a typo guard); anything on the keep list; anything in the bank or keyring.
+- **One item at a time,** a quarter of a second apart. It waits while you're holding an item on the cursor, so it never grabs the wrong one.
+- **If the game won't let an item go,** it's put back, tried once more, then left alone with one line in chat (*couldn't get rid of …*).
+- **It's installed as a new file** (`BoxBridgeJunk.lua`): quit and restart the clients once after updating to 1.8, a `/reload` isn't enough.
 
 ## The party panel (`/bb panel`)
 
