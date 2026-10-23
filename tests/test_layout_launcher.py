@@ -174,3 +174,46 @@ def test_thumbnails_and_tabs_are_not_always_on_top():
     from wowbox.layout.tabs import TabBar
     for w in (ThumbStrip(str, lambda h: True), TabBar(str, lambda h: True)):
         assert not w.windowFlags() & Qt.WindowStaysOnTopHint
+
+
+def test_with_thumbs_follow_wow_off_a_swap_leaves_the_strip_where_it_is():
+    """Off: a program you put over the thumbnails stays on top when you swap; Arrange still brings them up."""
+    r = Rig()
+    strip_raised = []
+    move = r.windows.move
+
+    def spy(hwnd, rect, *, to_top=False):
+        if hwnd == 999:
+            strip_raised.append(to_top)
+        else:
+            move(hwnd, rect, to_top=to_top)
+
+    class Thumbs(FakeThumbs):
+        def show_at(self, rect, entries, mover):
+            super().show_at(rect, entries, mover)
+            mover(999, rect)
+
+    r.windows.move = spy
+    lm = LayoutManager(r.cfg.layout, r.team, r.windows, thumbs=Thumbs())
+    lm.apply("main_thumbs")
+    lm.set_main(3)
+    assert strip_raised[-1] is True  # on (the default): it comes up with WoW
+    r.cfg.layout.thumbs_follow_wow = False
+    lm.set_main(2)
+    assert strip_raised[-1] is False
+    lm.apply()
+    assert strip_raised[-1] is True  # Arrange brings it up
+
+
+def test_stay_with_wow_does_nothing_while_follow_is_off():
+    import sys
+    from PySide6.QtWidgets import QApplication, QWidget
+    QApplication.instance() or QApplication([])
+    from wowbox.layout.zorder import StayWithWoW
+    on = [False]
+    z = StayWithWoW(QWidget(), lambda h: True, lambda: on[0])
+    z.widget.isVisible = lambda: True
+    z._last = 123
+    if sys.platform == "win32":
+        z.check()
+        assert z._last is None  # nothing moved; checks again at once when turned back on

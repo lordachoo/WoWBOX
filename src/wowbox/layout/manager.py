@@ -45,6 +45,10 @@ class LayoutManager:
     def _mover(self, hwnd: int, rect: Rect) -> None:
         self.windows.move(hwnd, rect, to_top=True)
 
+    def _strip_mover(self, hwnd: int, rect: Rect) -> None:
+        """The thumbnail strip on a swap: brought up only if it follows WoW (Arrange always brings it up)."""
+        self.windows.move(hwnd, rect, to_top=self.cfg.thumbs_follow_wow)
+
     def _prepare(self, hwnd: int) -> None:
         self.windows.restore(hwnd)
         self.windows.make_borderless(hwnd)
@@ -112,7 +116,7 @@ class LayoutManager:
         if focus:
             self.windows.set_foreground(h)
         if self.current == "main_thumbs" and self.thumbs and self.main_area is not None:
-            self.thumbs.show_at(self._main_strip()[1], self._thumb_entries(), self._mover)
+            self.thumbs.show_at(self._main_strip()[1], self._thumb_entries(), self._strip_mover)
         if self.current == "tabs" and self.tabs:
             self.tabs.set_main(slot)
 

@@ -24,6 +24,11 @@ class Setting:
 
 
 GROUPS: list[tuple[str, list[Setting]]] = [
+    ("Layout", [
+        Setting("layout", "thumbs_follow_wow", "Thumbnails come up with WoW",
+                "Clicking into WoW brings the thumbnail strip (or tab bar) back above other programs. Off: it stays "
+                "where it is, so a program you put over it stays on top; Arrange brings it up."),
+    ]),
     ("Automation: queue and turn-taking", [
         Setting("automation_options", "chat_queue", "Queue per chat rule",
                 "Requests that come in while a chat rule is busy wait their turn, one per person, up to this many. "

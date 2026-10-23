@@ -112,13 +112,20 @@ class MainWindow(QMainWindow):
         self.cb_mirror = QCheckBox(f"Mirror movement [{hk.mirror_movement}]")
         self.cb_mirror.setToolTip("Copy your movement keys (follow.movement_keys) to the followers too")
         self.cb_mirror.toggled.connect(self.c.router.set_mirror)
+        self.cb_thumbs_up = QCheckBox("Thumbs over apps")
+        self.cb_thumbs_up.setToolTip("Clicking into WoW brings the thumbnails (or tab bar) back above other "
+                                     "programs. Off: a program you put over them stays on top; Arrange brings "
+                                     "them up. Save it in the Settings tab.")
+        self.cb_thumbs_up.setChecked(self.c.cfg.layout.thumbs_follow_wow)
+        self.cb_thumbs_up.toggled.connect(lambda on: self.c.apply_setting("layout", "thumbs_follow_wow", on))
         b_frames = QPushButton("Restore frames", clicked=self.c.layout.restore_frames)
         b_frames.setToolTip("Put the normal window borders back on all clients")
         b_reload = QPushButton("Reload config", clicked=self.c.reload_config)
         b_save = QPushButton("Save config", clicked=self.c.save_config)
 
         for group in ((self.b_broadcast, self.b_follow, self.b_stack, self.cb_mirror, self.b_auto, self.cb_dry, b_release),
-                      (b_launch, b_attach, b_arrange, QLabel("Layout:"), self.layout_combo, QLabel("Leader:"),
+                      (b_launch, b_attach, b_arrange, QLabel("Layout:"), self.layout_combo, self.cb_thumbs_up,
+                       QLabel("Leader:"),
                        self.leader_combo, b_frames, b_reload, b_save)):
             bar = QHBoxLayout()
             for w in group:
@@ -579,7 +586,8 @@ class MainWindow(QMainWindow):
         self.b_follow.setText(f"Follow: {'ON' if following else 'OFF'}")
         self.b_follow.setStyleSheet("background: #1565c0; color: white; font-weight: bold;" if following else "")
         for cb, value in ((self.cb_dry, self.c.engine.dry_run),
-                          (self.cb_mirror, self.c.router.mirror)):
+                          (self.cb_mirror, self.c.router.mirror),
+                          (self.cb_thumbs_up, self.c.cfg.layout.thumbs_follow_wow)):
             if cb.isChecked() != value:
                 cb.blockSignals(True)
                 cb.setChecked(value)

@@ -11,6 +11,8 @@
 | `main_thumbs` | One big main client plus live thumbnails of the rest. Click a thumbnail to swap. On a wide monitor (21:9, 32:9) the main client keeps a 16:9 shape on the left and the thumbnails stack on the right; otherwise they sit in a strip along the bottom. `layout.thumb_side` (auto / right / bottom) picks; `layout.thumbs_monitor: 2` puts them on another monitor. |
 | `tabs` | One client fills the monitor, and a tab bar switches between them. |
 
+The thumbnail strip and tab bar come back above other programs whenever you click into WoW. To put another program over them and keep it there while you play, untick **Thumbs over apps** on the toolbar (or `layout.thumbs_follow_wow: false`, also in the Settings tab). **Arrange** brings them up again.
+
 Ctrl+Alt+L cycles the layouts. In main_thumbs and tabs, all clients share one size and position, so swapping only raises a window. Nothing is resized, which avoids a D3D device reset.
 
 **Sharpness:** the game renders at its own resolution (`gxResolution`), and Windows stretches that into the window. If the picture looks blurry or squashed, set the in-game resolution to the window size. Alternatively, set `client.resolution` and `client.set_windowed_cvars: true` so `Config.wtf` is written before launch (a backup is kept).
@@ -28,7 +30,7 @@ Everything lives in `config\team.yaml`. The exe uses `config\team.yaml` next to 
 |---|---|
 | `client` | `exe`, `args`, `set_windowed_cvars`, `resolution`, `launch_stagger` (3s), `window_timeout` (120s), `rename_windows` |
 | `team` | `leader`, `slots: {n: {label, role, character}}` |
-| `layout` | `default`, `monitor`, `thumbs_monitor`, `thumb_strip` (0.22), `thumb_side` (auto), `tab_bar_height` |
+| `layout` | `default`, `monitor`, `thumbs_monitor`, `thumb_strip` (0.22), `thumb_side` (auto), `thumbs_follow_wow` (true), `tab_bar_height` |
 | `hotkeys` | `toggle_broadcast`, `release_all`, `follow`, `stay`, `stack`, `mirror_movement`, `cycle_layout`, `next_main`, `automation_kill`, `focus_slot: {n: chord}` |
 | `broadcast` | `enabled_on_start`, `chatguard`, `chatguard_open_keys`, `chatguard_close_keys`, `modifier_mode` (post / focus_swap / strip), `focus_swap_dwell`, `only_when_wow_focused`, `type_wait_max` (8 s), `type_quiet` (0.35 s) |
 | `follow`, `stack` | [Follow, stacking and movement mirroring](follow.md) |

@@ -106,6 +106,9 @@ class LayoutConfig(_Model):
     # Where the thumbnails go on the main monitor. right: the main client keeps a 16:9 shape on the left and the
     # thumbnails fill the column to its right. auto: right on wide monitors (21:9, 32:9), bottom otherwise.
     thumb_side: Literal["auto", "right", "bottom"] = "auto"
+    # The thumbnail strip / tab bar come back above other programs whenever you click into WoW. Off: they stay
+    # wherever they are, like a normal window (another program can cover them); Arrange brings them up.
+    thumbs_follow_wow: bool = True
     tab_bar_height: int = 28
 
 

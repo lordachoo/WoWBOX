@@ -44,7 +44,8 @@ def dwm():
 class ThumbStrip(QWidget):
     clicked = Signal(int)
 
-    def __init__(self, label_for: Callable[[int], str], is_wow: Callable[[int], bool] = lambda h: False) -> None:
+    def __init__(self, label_for: Callable[[int], str], is_wow: Callable[[int], bool] = lambda h: False,
+                 follow: Callable[[], bool] = lambda: True) -> None:
         super().__init__(None, Qt.FramelessWindowHint | Qt.Tool)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
         self.setWindowTitle("WoWBox thumbnails")
@@ -53,7 +54,7 @@ class ThumbStrip(QWidget):
         self._thumbs: dict[int, int] = {}  # source hwnd -> HTHUMBNAIL
         self._cells: list[tuple[int, Rect]] = []  # (slot, cell in physical px)
         self._size = (0, 0)
-        self._z = StayWithWoW(self, is_wow)
+        self._z = StayWithWoW(self, is_wow, follow)
 
     def show_at(self, rect: Rect, entries: list[tuple[int, int]], mover: Callable[[int, Rect], None]) -> None:
         """entries: (slot, hwnd) for the clients to show. rect in physical px."""

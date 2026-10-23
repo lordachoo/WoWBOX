@@ -13,7 +13,8 @@ from .zorder import StayWithWoW
 class TabBar(QWidget):
     clicked = Signal(int)
 
-    def __init__(self, label_for: Callable[[int], str], is_wow: Callable[[int], bool] = lambda h: False) -> None:
+    def __init__(self, label_for: Callable[[int], str], is_wow: Callable[[int], bool] = lambda h: False,
+                 follow: Callable[[], bool] = lambda: True) -> None:
         super().__init__(None, Qt.FramelessWindowHint | Qt.Tool)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
         self.setWindowTitle("WoWBox tabs")
@@ -26,7 +27,7 @@ class TabBar(QWidget):
         self._layout.setContentsMargins(2, 2, 2, 2)
         self._layout.setSpacing(2)
         self._buttons: dict[int, QPushButton] = {}
-        self._z = StayWithWoW(self, is_wow)
+        self._z = StayWithWoW(self, is_wow, follow)
 
     def show_at(self, rect: Rect, slots: list[int], main: int, mover: Callable[[int, Rect], None]) -> None:
         if list(self._buttons) != slots:

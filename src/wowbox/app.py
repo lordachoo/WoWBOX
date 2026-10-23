@@ -92,8 +92,9 @@ class Controller(QObject):
         self.chatguard.on_change = lambda _open: self.sig_changed.emit()
 
         is_wow = lambda h: self.team.slot_for_hwnd(h) is not None  # noqa: E731
-        self.thumbs = ThumbStrip(self.label_for, is_wow)
-        self.tabs = TabBar(self.label_for, is_wow)
+        follow = lambda: self.cfg.layout.thumbs_follow_wow  # noqa: E731
+        self.thumbs = ThumbStrip(self.label_for, is_wow, follow)
+        self.tabs = TabBar(self.label_for, is_wow, follow)
         self.layout = LayoutManager(cfg.layout, self.team, windows, self.thumbs, self.tabs)
         self.thumbs.clicked.connect(lambda s: self.layout.set_main(s))
         self.tabs.clicked.connect(lambda s: self.layout.set_main(s))
