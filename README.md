@@ -34,7 +34,7 @@ In this file:
 
 In `docs/`:
 
-- [The BoxBridge addon and `/bb` commands](docs/addon.md)
+- [The BoxBridge addon and `/bb` commands](docs/addon.md) (party panel, auto-deleting junk: `/bb junk`)
 - [Running WoWBox](docs/running.md)
 - [Your team and targets](docs/team.md)
 - [Key broadcasting and in-game team commands](docs/broadcasting.md)

@@ -2,7 +2,7 @@
 
 [← README](../README.md)
 
-- [The BoxBridge addon and `/bb` commands](addon.md)
+- [The BoxBridge addon and `/bb` commands](addon.md) (party panel, auto-deleting junk: `/bb junk`)
 - [Running WoWBox](running.md)
 - [Your team and targets](team.md)
 - [Key broadcasting and in-game team commands](broadcasting.md)
