@@ -224,3 +224,13 @@ def test_any_wow_renderer_window_counts():
     for name in ("GxWindowClassD3d", "GxWindowClass", "GxWindowClassOpenGl", "GxWindowClassVulkan"):
         assert is_wow_class(name)
     assert not is_wow_class("Chrome_WidgetWin_1")
+
+
+def test_a_vulkan_brightened_strip_says_so():
+    import numpy as np
+    import pytest
+    from wowbox.bridge.decoder import DecodeError, decode_frame
+    img = np.zeros((8, 600, 3), np.uint8)
+    img[:, :6] = (255, 0, 255)  # the header as the Vulkan renderer draws it
+    with pytest.raises(DecodeError, match="DirectX"):
+        decode_frame(img)

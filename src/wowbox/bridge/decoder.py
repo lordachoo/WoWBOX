@@ -239,6 +239,8 @@ def decode_frame(img: np.ndarray, *, tol: int = 4) -> ClientState | ChatEvent:
     probe_x = 1 if img.shape[1] > 1 else 0
     header = next((h for y in range(min(2, img.shape[0])) if (h := _header(img[y, probe_x], tol))), None)
     if header is None:
+        if _close(img[0, probe_x], (255, 0, 255), 12):  # the header, over-brightened and clipped
+            raise DecodeError("strip colours altered by the game (Vulkan renderer?): switch the client to DirectX")
         raise DecodeError("no BoxBridge header (addon off, UI hidden, or wrong capture region)")
     height = 0
     while height < img.shape[0] and _close(img[height, probe_x], header, tol):
