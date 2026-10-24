@@ -217,3 +217,10 @@ def test_stay_with_wow_does_nothing_while_follow_is_off():
     if sys.platform == "win32":
         z.check()
         assert z._last is None  # nothing moved; checks again at once when turned back on
+
+
+def test_any_wow_renderer_window_counts():
+    from wowbox.platform.win32_windows import is_wow_class
+    for name in ("GxWindowClassD3d", "GxWindowClass", "GxWindowClassOpenGl", "GxWindowClassVulkan"):
+        assert is_wow_class(name)
+    assert not is_wow_class("Chrome_WidgetWin_1")

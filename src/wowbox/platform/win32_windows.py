@@ -10,7 +10,12 @@ from .base import MonitorInfo, Rect, WindowAPI
 
 log = logging.getLogger(__name__)
 
-WOW_CLASSES = {"GxWindowClassD3d", "GxWindowClass", "GxWindowClassOpenGl"}
+# WoW's window class, one per renderer: GxWindowClassD3d, GxWindowClassOpenGl, GxWindowClassVulkan, ...
+WOW_CLASS_PREFIX = "GxWindowClass"
+
+
+def is_wow_class(name: str) -> bool:
+    return name.startswith(WOW_CLASS_PREFIX)
 
 GWL_STYLE, GWL_EXSTYLE = -16, -20
 WS_CAPTION, WS_THICKFRAME, WS_SYSMENU = 0x00C00000, 0x00040000, 0x00080000
@@ -30,7 +35,7 @@ class Win32Windows(WindowAPI):
         self._orig_styles: dict[int, tuple[int, int]] = {}
 
     def list_wow_windows(self) -> list[int]:
-        return [h for h in w.all_top_level_windows() if w.window_class(h) in WOW_CLASSES]
+        return [h for h in w.all_top_level_windows() if is_wow_class(w.window_class(h))]
 
     def windows_for_pid(self, pid: int) -> list[int]:
         return [h for h in self.list_wow_windows() if w.window_pid(h) == pid]
