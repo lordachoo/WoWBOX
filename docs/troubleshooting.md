@@ -9,6 +9,7 @@
 | Keys don't reach other clients | Run WoW and WoWBox at the same privilege level. The log says *access denied* when that's the cause. |
 | A character keeps running / key stuck | Ctrl+Alt+Pause (release all). Turning broadcast off also releases everything. |
 | Modifier binds don't fire on followers | `broadcast.modifier_mode: focus_swap`, or binds without modifiers. |
+| Bridge: `strip colours altered by the game (Vulkan renderer?)` | **The client is in Vulkan mode: switch it to DirectX (DX).** EQWOW's Vulkan renderer brightens the strip until the data is lost; DX draws it exactly. |
 | Bridge: `no BoxBridge header` | Addon not enabled for that character, UI hidden (Alt+Z), or something covers the top-left corner. |
 | Bridge: `checksum failed` / `blocks visible` | Something is drawn over the strip, the window is too small (`/bb size 12`), or a client still runs the old addon (`/reload`). |
 | Bridge stale on a minimized client | Minimized clients don't draw. Use main_thumbs or tabs instead of minimizing. |

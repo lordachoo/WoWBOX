@@ -88,6 +88,8 @@ In `docs/`:
 
 ## 3. Quick start
 
+> **EQWOW: run the clients in DirectX (DX) mode, not Vulkan.** The Vulkan renderer changes the colours of BoxBridge's pixel strip, so WoWBox can't read any client (no health, target, chat rules or automation). Pick DirectX in the game's Video options, or check `SET gxApi` in `WTF\Config.wtf`. Tiling and key broadcasting work in either mode.
+
 ```powershell
 cd WOWBOX                                              # wherever you cloned or unpacked it
 powershell -ExecutionPolicy Bypass -File setup.ps1     # once: Python 3.12 venv + dependencies + config\team.yaml
